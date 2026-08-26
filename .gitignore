@@ -1,0 +1,11 @@
+bin/
+obj/
+AppPackages/
+*.user
+*.binlog
+*.appxsym
+*.pfx
+.vs/
+.idea/
+.DS_Store
+TestResults/

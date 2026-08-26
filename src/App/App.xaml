@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="AITokenUsageWidget.App.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- 品牌色（§3.1，与 macOS 版一致；深色档提亮保证对比度） -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="BrandDeepSeek" Color="#3B82F5" />
+                    <SolidColorBrush x:Key="BrandKimi" Color="#8C5CF5" />
+                    <SolidColorBrush x:Key="BrandGlm" Color="#059E87" />
+                    <SolidColorBrush x:Key="SimulatedBadgeBrush" Color="#F97316" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="BrandDeepSeek" Color="#60A5FA" />
+                    <SolidColorBrush x:Key="BrandKimi" Color="#A78BFA" />
+                    <SolidColorBrush x:Key="BrandGlm" Color="#34D399" />
+                    <SolidColorBrush x:Key="SimulatedBadgeBrush" Color="#FB923C" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <!-- 设置卡片样式（§3.1：卡片 8px 圆角） -->
+            <Style x:Key="CardBorder" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="16" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

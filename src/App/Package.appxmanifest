@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 com rescap">
+
+  <Identity
+    Name="Chenxing.AITokenUsageWidget"
+    Publisher="CN=chenxing890"
+    Version="1.0.0.0" />
+
+  <Properties>
+    <DisplayName>AI 模型用量</DisplayName>
+    <PublisherDisplayName>chenxing890</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="x-generate" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App"
+      Executable="$targetnametoken$.exe"
+      EntryPoint="$targetentrypoint$">
+      <uap:VisualElements
+        DisplayName="AI 模型用量"
+        Description="DeepSeek 余额与 Kimi / GLM 的 5 小时、7 天及总用量小组件"
+        BackgroundColor="#1F2A44"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!-- 点击告警 Toast 通过协议拉起主 App 对应供应商页（FR-4） -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="aitokenusagewidget">
+            <uap:DisplayName>AI 模型用量</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+
+        <!-- Widget Provider COM 服务器（无头模式，Arguments 区分启动路径） -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer
+              Executable="AITokenUsageWidget.App.exe"
+              Arguments="-RegisterProcessAsComServer"
+              DisplayName="AI 模型用量 Widget Provider">
+              <com:Class Id="8B4D2E11-6B7C-4F2A-9B0D-3C1E5A9F7D42" DisplayName="AiWidgetProvider" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+
+        <!-- 小组件接入 Widgets Board（中 / 大两种尺寸，FR-2） -->
+        <uap3:Extension Category="windows.appExtension" DisplayName="AI 模型用量" Id="com.chenxing.aitokenusagewidget" PublicFolder="Public">
+          <uap3:Properties>
+            <WidgetProvider>
+              <ProviderIcons>
+                <Icon Path="Assets\StoreLogo.png" />
+              </ProviderIcons>
+              <Activation>
+                <CreateInstance ClassId="8B4D2E11-6B7C-4F2A-9B0D-3C1E5A9F7D42" />
+              </Activation>
+              <Definitions>
+                <Definition Id="AITokenUsageWidget.Main" DisplayName="AI 模型用量"
+                  Description="DeepSeek 余额与 Kimi / GLM 的 5 小时、7 天及总用量。">
+                  <Capabilities>
+                    <Capability>
+                      <Size Name="medium" />
+                    </Capability>
+                    <Capability>
+                      <Size Name="large" />
+                    </Capability>
+                  </Capabilities>
+                  <ThemeResources>
+                    <Icons>
+                      <Icon Path="Assets\WidgetIcon.png" />
+                    </Icons>
+                    <LightMode />
+                    <DarkMode />
+                  </ThemeResources>
+                </Definition>
+              </Definitions>
+            </WidgetProvider>
+          </uap3:Properties>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="AppDisplayName" xml:space="preserve">
+    <value>AI Usage</value>
+  </data>
+  <data name="AppDescription" xml:space="preserve">
+    <value>DeepSeek balance &amp; Kimi / GLM 5-hour, 7-day and total usage widgets</value>
+  </data>
+  <data name="WidgetDisplayName" xml:space="preserve">
+    <value>AI Usage</value>
+  </data>
+  <data name="WidgetDescription" xml:space="preserve">
+    <value>DeepSeek balance &amp; Kimi / GLM 5-hour, 7-day and total usage.</value>
+  </data>
+</root>

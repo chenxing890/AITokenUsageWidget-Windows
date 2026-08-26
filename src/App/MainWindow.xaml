@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="AITokenUsageWidget.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 配置文件损坏提示（§4.5） -->
+        <muxc:InfoBar x:Name="CorruptInfoBar" Grid.Row="0" Severity="Warning" IsOpen="False"
+                      Title="配置文件已损坏"
+                      Message="已自动备份，请重新配置供应商。" />
+
+        <muxc:NavigationView
+            x:Name="NavView" Grid.Row="1"
+            IsBackButtonVisible="Collapsed"
+            IsSettingsVisible="False"
+            PaneDisplayMode="Left"
+            OpenPaneLength="240"
+            SelectionChanged="OnSelectionChanged">
+
+            <muxc:NavigationView.MenuItems>
+                <muxc:NavigationViewItemSeparator />
+                <muxc:NavigationViewItem Content="DeepSeek" Tag="deepseek" IsSelected="True">
+                    <muxc:NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xEC4C;" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="Kimi Code" Tag="kimi">
+                    <muxc:NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE708;" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="GLM Coding" Tag="glm">
+                    <muxc:NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xEF83;" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItemSeparator />
+                <muxc:NavigationViewItem Content="外观" Tag="appearance">
+                    <muxc:NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE790;" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="通知" Tag="notifications">
+                    <muxc:NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE7ED;" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+            </muxc:NavigationView.MenuItems>
+
+            <muxc:NavigationView.FooterMenuItems>
+                <muxc:NavigationViewItem Content="关于" Tag="about">
+                    <muxc:NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE946;" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+            </muxc:NavigationView.FooterMenuItems>
+
+            <Frame x:Name="ContentFrame" />
+        </muxc:NavigationView>
+    </Grid>
+</Window>

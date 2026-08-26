@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    本地化资源（FR-1 / §6.4）：zh-CN 首发；en-US 完整。
+    清单 Display 名（AppDisplayName / WidgetDisplayName 等）经 ms-resource 引用。
+  -->
+  <data name="AppDisplayName" xml:space="preserve">
+    <value>AI 模型用量</value>
+  </data>
+  <data name="AppDescription" xml:space="preserve">
+    <value>DeepSeek 余额与 Kimi / GLM 的 5 小时、7 天及总用量小组件</value>
+  </data>
+  <data name="WidgetDisplayName" xml:space="preserve">
+    <value>AI 模型用量</value>
+  </data>
+  <data name="WidgetDescription" xml:space="preserve">
+    <value>显示 DeepSeek 余额与 Kimi / GLM 的 5 小时、7 天及总用量。</value>
+  </data>
+</root>
