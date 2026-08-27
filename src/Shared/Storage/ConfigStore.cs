@@ -20,8 +20,11 @@ public sealed class ConfigStore
     /// <summary>最近一次 Load 因文件损坏而保留了 corrupt 备份（供 UI 提示，一次性读取）。</summary>
     public string? LastQuarantinedFile { get; private set; }
 
-    /// <summary>最近一次 Load 读取失败（IO 异常，非损坏）。此状态下应避免回写覆盖。</summary>
+    /// <summary>最近一次 Load 读取失败（IO 异常或未能取得跨进程锁）。此状态下应避免回写覆盖。</summary>
     public bool LastLoadFailed { get; private set; }
+
+    /// <summary>最近一次 Save 因未能取得跨进程锁而跳过写入（数据未持久化，但绝不无锁裸写覆盖）。</summary>
+    public bool LastSaveSkipped { get; private set; }
 
     public static ConfigStore Default { get; } = new();
 
@@ -51,6 +54,12 @@ public sealed class ConfigStore
             string json;
             using (var gate = CrossProcessLock.Acquire(LockName, _sharedPath + ".lock"))
             {
+                if (gate == null)
+                {
+                    // 未持锁：读视为失败，返回空负载但不隔离、不回写（调用方见 LastLoadFailed 中止写入）
+                    LastLoadFailed = true;
+                    return SharedData.Empty();
+                }
                 try
                 {
                     if (!File.Exists(_sharedPath)) return SharedData.Empty();
@@ -71,8 +80,8 @@ public sealed class ConfigStore
                     catch (IOException) { }
                     return SharedData.Empty();
                 }
+                return Decode(json, quarantine: true);
             }
-            return Decode(json, quarantine: true);
         }
     }
 
@@ -139,12 +148,20 @@ public sealed class ConfigStore
     {
         lock (_ioGate)
         {
+            LastSaveSkipped = false;
             Directory.CreateDirectory(_baseDir);
             var json = SharedDataJson.Write(data, _protector);
             var tmpPath = _sharedPath + ".tmp";
 
             using (var gate = CrossProcessLock.Acquire(LockName, _sharedPath + ".lock"))
             {
+                if (gate == null)
+                {
+                    // 未持锁：跳过写入（可能丢一次缓存刷新，但绝不无锁裸写覆盖用户配置）
+                    try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch (IOException) { }
+                    LastSaveSkipped = true;
+                    return;
+                }
                 // 1. 写前备份
                 try
                 {
@@ -172,6 +189,8 @@ public sealed class ConfigStore
     }
 
     // ---- 局部更新便捷方法（读-改-写，全程持锁由 Load/Save 保证） ----
+    // 所有方法遵循同一铁律：Load 失败（IO 异常 / 未取得锁）时立即中止，
+    // 绝不把空负载回写覆盖用户的已配置内容。
 
     public ProviderConfig? FindConfig(ProviderKind kind) =>
         Load().Configs.FirstOrDefault(c => c.Kind == kind);
@@ -179,6 +198,7 @@ public sealed class ConfigStore
     public void SaveConfig(ProviderConfig config)
     {
         var data = Load();
+        if (LastLoadFailed) return;
         var index = data.Configs.FindIndex(c => c.Kind == config.Kind);
         if (index >= 0) data.Configs[index] = config;
         else data.Configs.Add(config);
@@ -188,6 +208,7 @@ public sealed class ConfigStore
     public void SetTheme(ThemePreference theme)
     {
         var data = Load();
+        if (LastLoadFailed) return;
         data.Theme = theme;
         Save(data);
     }
@@ -195,6 +216,7 @@ public sealed class ConfigStore
     public void SetAlertsEnabled(bool enabled)
     {
         var data = Load();
+        if (LastLoadFailed) return;
         data.AlertsEnabled = enabled;
         Save(data);
     }
@@ -202,6 +224,7 @@ public sealed class ConfigStore
     public void SetAlertThreshold(double threshold)
     {
         var data = Load();
+        if (LastLoadFailed) return;
         data.AlertThreshold = threshold is > 0 and <= 100 ? threshold : 80;
         Save(data);
     }
@@ -210,6 +233,7 @@ public sealed class ConfigStore
     public void SetAlertThresholdAndReset(double threshold)
     {
         var data = Load();
+        if (LastLoadFailed) return;
         data.AlertThreshold = threshold is > 0 and <= 100 ? threshold : 80;
         data.AlertedKeys.Clear();
         Save(data);
@@ -218,6 +242,7 @@ public sealed class ConfigStore
     public void ReplaceAlertedKeys(IEnumerable<string> keys)
     {
         var data = Load();
+        if (LastLoadFailed) return;
         data.AlertedKeys = keys.Distinct().ToList();
         Save(data);
     }
@@ -226,6 +251,7 @@ public sealed class ConfigStore
     public void SaveCachedUsages(IReadOnlyList<ProviderUsage> usages)
     {
         var data = Load();
+        if (LastLoadFailed) return;
         data.CachedUsages = usages.ToList();
         Save(data);
     }

@@ -24,6 +24,8 @@ public sealed partial class UsageCardControl : UserControl
     public UsageCardControl()
     {
         InitializeComponent();
+        // 主题切换后按新主题重取画刷重绘（代码生成的画刷是快照，不随主题自动更新）
+        ActualThemeChanged += (_, _) => Render();
     }
 
     private static void OnUsageChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -180,7 +182,7 @@ public sealed partial class UsageCardControl : UserControl
         }
     }
 
-    private static Grid ProgressTrack(double percent)
+    private Grid ProgressTrack(double percent)
     {
         var grid = new Grid { Height = 4 };
         grid.Children.Add(new Border
@@ -242,12 +244,19 @@ public sealed partial class UsageCardControl : UserControl
         return new SolidColorBrush(color);
     }
 
-    private static Brush TrackBrush() =>
-        (Brush)Microsoft.UI.Xaml.Application.Current.Resources["SubtleFillColorTertiaryBrush"];
+    // 从 Application.Resources 取画刷只会解析应用启动时的主题，窗口级 RequestedTheme
+    // 切换后仍是旧主题快照（深色模式下黑字看不清）。改按控件 ActualTheme 取值。
+    private bool IsDark => ActualTheme == ElementTheme.Dark;
 
-    private Brush SecondaryBrush() =>
-        (Brush)Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorSecondaryBrush"];
+    private Brush SecondaryBrush() => new SolidColorBrush(IsDark
+        ? Windows.UI.Color.FromArgb(0xC5, 255, 255, 255)
+        : Windows.UI.Color.FromArgb(0x9D, 0, 0, 0));
 
-    private Brush TertiaryBrush() =>
-        (Brush)Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorTertiaryBrush"];
+    private Brush TertiaryBrush() => new SolidColorBrush(IsDark
+        ? Windows.UI.Color.FromArgb(0x8A, 255, 255, 255)
+        : Windows.UI.Color.FromArgb(0x72, 0, 0, 0));
+
+    private Brush TrackBrush() => new SolidColorBrush(IsDark
+        ? Windows.UI.Color.FromArgb(0x0A, 255, 255, 255)
+        : Windows.UI.Color.FromArgb(0x06, 0, 0, 0));
 }

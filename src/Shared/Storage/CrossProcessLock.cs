@@ -4,12 +4,14 @@ namespace AITokenUsageWidget.Shared.Storage;
 
 /// <summary>
 /// 跨进程读写锁：Windows 使用命名 Mutex（Local\ 命名空间），其余平台（单测）
-/// 退化为进程内锁 + 独占文件句柄。获取失败（锁冲突）时短暂重试（最多 3 次，间隔 100ms，FR-5）。
+/// 退化为进程内锁 + 独占文件句柄。获取失败（锁冲突）时短暂重试（最多 5 次，间隔 200ms，FR-5）。
+/// 最终失败返回 null —— 调用方必须按「未持锁」处理：读视为失败、写直接跳过，
+/// 绝不在无锁状态下裸读写共享文件（否则并发读写窗口期会读到不存在的文件并回写空配置）。
 /// </summary>
 public static class CrossProcessLock
 {
-    private const int RetryCount = 3;
-    private const int RetryDelayMs = 100;
+    private const int RetryCount = 5;
+    private const int RetryDelayMs = 200;
 
     public static IDisposable? Acquire(string name, string? lockFilePath = null, int timeoutPerTryMs = 100)
     {
@@ -36,7 +38,11 @@ public static class CrossProcessLock
             try
             {
                 // AbandonedMutexException 时锁实际上已被本线程获得，可直接使用
-                mutex.WaitOne(timeoutMs);
+                if (!mutex.WaitOne(timeoutMs))
+                {
+                    mutex.Dispose();
+                    return null; // 超时未取得锁：必须向上返回失败，绝不能当作已持锁
+                }
                 return new NamedMutexLock(mutex);
             }
             catch (AbandonedMutexException)

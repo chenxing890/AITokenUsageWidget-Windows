@@ -9,3 +9,5 @@ AppPackages/
 .idea/
 .DS_Store
 TestResults/
+artifacts/
+*.log

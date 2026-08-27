@@ -17,6 +17,29 @@ public sealed class FakeProtector : ISecretProtector
     }
 }
 
+public class DpapiTests
+{
+    [Fact]
+    public void Protect_Unprotect_RoundTrip()
+    {
+        if (!OperatingSystem.IsWindows()) return; // DPAPI 仅 Windows
+        var protector = new DpapiSecretProtector();
+        var stored = protector.Protect("sk-roundtrip-123");
+        Assert.StartsWith("dpapi:", stored);
+        Assert.DoesNotContain("sk-roundtrip-123", stored);
+        Assert.Equal("sk-roundtrip-123", protector.Unprotect(stored));
+    }
+
+    [Fact]
+    public void Unprotect_FailureReturnsOriginal_NotEmpty()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var protector = new DpapiSecretProtector();
+        const string garbage = "dpapi:!!!not-base64!!!";
+        Assert.Equal(garbage, protector.Unprotect(garbage)); // 解密失败必须返回原值，返回 "" 会抹掉配置
+    }
+}
+
 public class ConfigStoreTests : IDisposable
 {
     private readonly string _dir;
@@ -203,5 +226,44 @@ public class ConfigStoreTests : IDisposable
         File.WriteAllText(SharedPath, """{"configs":[{"kind":"deepseek","apiKey":"sk-legacy"}]}""");
         var data = _store.Load();
         Assert.Equal("sk-legacy", data.Configs.Single().ApiKey);
+    }
+
+    [Fact]
+    public void LockUnavailable_LoadFailsWithoutQuarantine_SaveSkipped()
+    {
+        using var gate = CrossProcessLock.Acquire(ConfigStore.LockName, SharedPath + ".lock");
+        Assert.NotNull(gate); // 本线程持锁，模拟另一进程长期占用
+
+        // 必须在另一线程执行：Mutex/Monitor 对持锁线程可重入，无法模拟冲突
+        Task.Run(() =>
+        {
+            var data = _store.Load();
+            Assert.True(_store.LastLoadFailed);        // 读视为失败
+            Assert.Empty(data.Configs);
+            Assert.Null(_store.LastQuarantinedFile);   // 未持锁不隔离文件
+
+            _store.Save(new SharedData { AlertThreshold = 55 });
+            Assert.True(_store.LastSaveSkipped);       // 未持锁跳过写入
+            Assert.False(File.Exists(SharedPath));     // 绝不裸写
+        }).GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public void LockUnavailable_MutatorsNeverOverwriteExistingFile()
+    {
+        _store.Save(new SharedData
+        {
+            Configs = [new ProviderConfig(ProviderKind.DeepSeek) { IsEnabled = true, ApiKey = "sk-keep" }],
+        });
+        var before = File.ReadAllText(SharedPath);
+
+        using var gate = CrossProcessLock.Acquire(ConfigStore.LockName, SharedPath + ".lock");
+        Task.Run(() =>
+        {
+            _store.SaveCachedUsages([]);               // 模拟小组件后台刷新在锁冲突下的读-改-写
+            _store.SetTheme(ThemePreference.Dark);
+        }).GetAwaiter().GetResult();
+
+        Assert.Equal(before, File.ReadAllText(SharedPath)); // 已配置内容原封不动
     }
 }

@@ -18,7 +18,7 @@ public class WidgetCardTests
     }
 
     [Fact]
-    public void Build_ProducesValidAdaptiveCard()
+    public void Build_ProducesValidAdaptiveCard_NoActions()
     {
         var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(),
             ThemePreference.System, systemDark: false, Now);
@@ -26,11 +26,8 @@ public class WidgetCardTests
 
         Assert.Equal("AdaptiveCard", root.GetProperty("type").GetString());
         Assert.Equal("1.5", root.GetProperty("version").GetString());
-
-        var actions = root.GetProperty("actions");
-        var refresh = actions.EnumerateArray().Single();
-        Assert.Equal("Action.Execute", refresh.GetProperty("type").GetString());
-        Assert.Equal("refresh", refresh.GetProperty("verb").GetString()); // 手动刷新（FR-2）
+        // 对齐 macOS：卡片无任何操作按钮（刷新自动进行，点击卡片打开主 App）
+        Assert.False(root.TryGetProperty("actions", out _));
     }
 
     [Fact]
@@ -38,16 +35,45 @@ public class WidgetCardTests
     {
         var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(),
             ThemePreference.System, false, Now);
-        // 供应商区 ColumnSet 为三列（首部标题行是两列的另一个 ColumnSet）
-        var providerColumns = Parse(json).GetProperty("body").EnumerateArray()
-            .Where(e => e.GetProperty("type").GetString() == "ColumnSet")
-            .Select(e => e.TryGetProperty("columns", out var cols) ? cols.GetArrayLength() : 0)
-            .ToList();
-        Assert.Equal([2, 3], providerColumns); // FR-2 / §3.4：3 供应商自动紧凑三列
+        // body 整体包裹在带 selectAction 的 Container 中（点击卡片拉起主 App）
+        var container = Parse(json).GetProperty("body").EnumerateArray().Single();
+        Assert.Equal("Container", container.GetProperty("type").GetString());
+        // 无标题行：供应商区是唯一一个 ColumnSet，三列
+        var items = container.GetProperty("items").EnumerateArray().ToList();
+        var columnSets = items.Where(e => e.GetProperty("type").GetString() == "ColumnSet").ToList();
+        Assert.Single(columnSets);
+        Assert.Equal(3, columnSets[0].GetProperty("columns").GetArrayLength()); // FR-2 / §3.4：紧凑三列
+        Assert.DoesNotContain("AI 模型用量", json); // 无标题行（对齐 macOS）
 
         Assert.Contains("5h", json);   // dense 短标题
         Assert.Contains("工具", json);
-        Assert.DoesNotContain("▰", json); // dense 模式不画进度条
+        Assert.Contains("\"size\":\"Stretch\"", json); // §3.4：dense 也要胶囊进度条（PNG 拉伸条）
+        Assert.Contains("68%", json);  // Kimi 最大窗口百分比大字
+        Assert.Contains("\"type\":\"Image\"", json);       // §3.4：品牌图标
+        Assert.Contains("data:image/png;base64,", json);   // 图标内联 data URI
+    }
+
+    [Fact]
+    public void Card_SelectAction_OpensMainApp()
+    {
+        var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(),
+            ThemePreference.System, false, Now);
+        var container = Parse(json).GetProperty("body").EnumerateArray().Single();
+        var select = container.GetProperty("selectAction");
+        // Action.Execute（Provider 的 OnActionInvoked 拉起主 App）——
+        // Board 会静默拦截 Action.OpenUrl 的自定义协议
+        Assert.Equal("Action.Execute", select.GetProperty("type").GetString());
+        Assert.Equal("openApp", select.GetProperty("verb").GetString());
+    }
+
+    [Fact]
+    public void EmptyState_StillClickable()
+    {
+        var root = Parse(WidgetCard.Build(WidgetSize.Medium, [], ThemePreference.System, false, Now));
+        var container = root.GetProperty("body").EnumerateArray().Single();
+        var select = container.GetProperty("selectAction");
+        Assert.Equal("openApp", select.GetProperty("verb").GetString());
+        Assert.False(root.TryGetProperty("actions", out _)); // 空态也无按钮，引导文案 + 可点击
     }
 
     [Fact]
@@ -56,7 +82,7 @@ public class WidgetCardTests
         var usages = new List<ProviderUsage> { Placeholders.Kimi(), Placeholders.Glm() };
         var json = WidgetCard.Build(WidgetSize.Medium, usages, ThemePreference.System, false, Now);
 
-        Assert.Contains("▰", json); // 进度条
+        Assert.Contains("\"size\":\"Stretch\"", json); // 胶囊进度条 PNG
         Assert.Contains("5 小时", json);
     }
 
@@ -70,7 +96,7 @@ public class WidgetCardTests
         Assert.Contains("月度工具", json);
         Assert.Contains("126/1000 次", json);
         Assert.Contains("后重置", json); // 重置倒计时
-        Assert.Contains("▰", json);
+        Assert.Contains("\"size\":\"Stretch\"", json); // 胶囊进度条 PNG
     }
 
     [Fact]
@@ -111,7 +137,7 @@ public class WidgetCardTests
             ThemePreference.Dark, systemDark: false, Now);
         var root = Parse(json);
 
-        Assert.Equal("ms-appx:///Assets/CardBgDark.png",
+        Assert.StartsWith("data:image/png;base64,",
             root.GetProperty("backgroundImage").GetString());
         Assert.Contains("\"Light\"", json); // 显式浅色文字，避免白字落白底（§3.2）
     }
@@ -122,7 +148,7 @@ public class WidgetCardTests
         var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(),
             ThemePreference.Light, systemDark: true, Now);
 
-        Assert.Contains("ms-appx:///Assets/CardBgLight.png", json);
+        Assert.Contains("data:image/png;base64,", json);
         Assert.Contains("\"Dark\"", json);
     }
 
@@ -136,7 +162,7 @@ public class WidgetCardTests
     }
 
     [Fact]
-    public void CacheFallback_Annotation()
+    public void CacheFallback_ShowsDataWithoutToolbar()
     {
         var cached = Placeholders.Kimi();
         var usage = new ProviderUsage
@@ -146,7 +172,9 @@ public class WidgetCardTests
         };
         var json = WidgetCard.Build(WidgetSize.Medium, [usage], ThemePreference.System, false, Now);
 
-        Assert.Contains("更新失败，显示缓存数据", json);
+        // 缓存数据照常展示（无标题栏 / 无操作按钮，对齐 macOS）
+        Assert.Contains("Kimi Code", json);
+        Assert.Contains("\"size\":\"Stretch\"", json); // 胶囊进度条 PNG
     }
 
     [Fact]
@@ -156,8 +184,7 @@ public class WidgetCardTests
         try
         {
             var json = WidgetCard.Build(WidgetSize.Medium, [], ThemePreference.System, false, Now);
-            Assert.Contains("AI Usage", json);
-            Assert.Contains("Refresh", json);
+            Assert.Contains("Open the", json); // 空态引导文案随语言切换
         }
         finally
         {
@@ -166,11 +193,11 @@ public class WidgetCardTests
     }
 
     [Fact]
-    public void ProgressBar_ReflectsPercent()
+    public void LevelRgb_MatchesUsageCardControlPalette()
     {
-        Assert.Equal("▰▰▰▰▰▱▱▱▱▱", WidgetCard.ProgressBar(50));
-        Assert.Equal("▱▱▱▱▱▱▱▱▱▱", WidgetCard.ProgressBar(0));
-        Assert.Equal("▰▰▰▰▰▰▰▰▰▰", WidgetCard.ProgressBar(100));
+        Assert.Equal(new PngBar.Rgb(255, 69, 0), WidgetCard.LevelRgb(80));   // OrangeRed
+        Assert.Equal(new PngBar.Rgb(255, 140, 0), WidgetCard.LevelRgb(50));  // DarkOrange
+        Assert.Equal(new PngBar.Rgb(60, 179, 113), WidgetCard.LevelRgb(49)); // MediumSeaGreen
     }
 
     [Fact]

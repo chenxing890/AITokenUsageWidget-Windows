@@ -35,6 +35,9 @@ public sealed class ApiHttp
             {
                 PooledConnectionLifetime = TimeSpan.FromMinutes(10),
                 AutomaticDecompression = DecompressionMethods.All,
+                // HttpClient.Timeout 在某些环境下无法打断底层 TCP 连接阶段，
+                // ConnectTimeout 兜底，保证连接阶段最坏 10 秒返回
+                ConnectTimeout = TimeSpan.FromSeconds(TimeoutSeconds),
             })
             : new HttpClient(handler, disposeHandler: false);
         _client.Timeout = TimeSpan.FromSeconds(TimeoutSeconds);

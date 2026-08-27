@@ -26,6 +26,23 @@ public partial class App : Application
 
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        // 单实例（FR-5 前置）：小组件「打开应用」/Toast 每次协议激活都会拉起新进程，
+        // 多实例并发持有不同的配置快照，后写者会把先写者的 API Key 覆盖掉——
+        // 已注册实例直接重定向激活并退出本进程
+        var main = AppInstance.FindOrRegisterForKey("AITokenUsageWidget.Main");
+        if (!main.IsCurrent)
+        {
+            main.RedirectActivationToAsync(AppInstance.GetCurrent().GetActivatedEventArgs()).AsTask().Wait();
+            Exit();
+            return;
+        }
+        // 主实例：接收后续激活（唤起已有窗口，而不是再开一个）
+        main.Activated += (_, _) =>
+        {
+            if (MainAppWindow == null) return;
+            MainAppWindow.DispatcherQueue.TryEnqueue(() => MainAppWindow.Activate());
+        };
+
         L10n.UseSystemLanguage();
         AppSettings.Initialize();
         Services.ToastService.RegisterChannel(); // 首次启动注册通知渠道（FR-4）

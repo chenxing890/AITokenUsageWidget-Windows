@@ -15,6 +15,7 @@ public sealed class AiWidgetProvider : IWidgetProvider
 {
     public const string DefinitionId = "AITokenUsageWidget.Main";
     private const string RefreshVerb = "refresh";
+    private const string OpenAppVerb = "openApp";
 
     private static bool _recovered;
 
@@ -78,6 +79,27 @@ public sealed class AiWidgetProvider : IWidgetProvider
         if (actionInvokedArgs.Verb == RefreshVerb)
         {
             WidgetRefreshService.RefreshNow(actionInvokedArgs.WidgetContext.Id);
+        }
+        else if (actionInvokedArgs.Verb == OpenAppVerb)
+        {
+            LaunchMainApp();
+        }
+    }
+
+    /// <summary>通过已注册协议拉起主 App（Board 会拦截卡片内 OpenUrl 的自定义协议）。</summary>
+    private static void LaunchMainApp()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "aitokenusagewidget:",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception)
+        {
+            // 主 App 未安装/协议缺失时静默忽略
         }
     }
 

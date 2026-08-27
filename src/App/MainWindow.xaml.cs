@@ -24,6 +24,7 @@ public sealed partial class MainWindow : Window
     private const int MinHeight = 520;
 
     private bool _loading;
+    private ProviderKind? _currentPageKind; // 当前详情页供应商，避免重复导航
 
     /// <summary>侧栏供应商行视图模型。</summary>
     private sealed class ProviderRow
@@ -99,9 +100,7 @@ public sealed partial class MainWindow : Window
                 Kind = kind,
                 Name = kind.DisplayName(),
                 Subtitle = enabled ? kind.Subtitle() : "未启用",
-                SubtitleBrush = (Brush)Application.Current.Resources[enabled
-                    ? "TextFillColorSecondaryBrush"
-                    : "TextFillColorTertiaryBrush"],
+                SubtitleBrush = SidebarTextBrush(tertiary: !enabled),
                 DotVisibility = enabled ? Visibility.Visible : Visibility.Collapsed,
             };
         }).ToList();
@@ -113,10 +112,28 @@ public sealed partial class MainWindow : Window
         EnabledSummary.Text = $"{enabledCount}/{rows.Count} 已启用";
     }
 
+    /// <summary>
+    /// 侧栏副标题画刷：Application.Resources 只会解析启动时主题（快照），
+    /// 按窗口 ActualTheme 取值保证深色模式可读（LoadSidebar 随主题切换重建）。
+    /// </summary>
+    private Brush SidebarTextBrush(bool tertiary)
+    {
+        var dark = RootGrid.ActualTheme == ElementTheme.Dark;
+        var alpha = tertiary ? (byte)0x8A : (byte)0xC5;
+        return new SolidColorBrush(dark
+            ? Windows.UI.Color.FromArgb(alpha, 255, 255, 255)
+            : Windows.UI.Color.FromArgb(tertiary ? (byte)0x72 : (byte)0x9D, 0, 0, 0));
+    }
+
     private void OnProviderSelected(object sender, SelectionChangedEventArgs e)
     {
         if (ProviderList.SelectedItem is ProviderRow row)
         {
+            // 编辑配置会触发 AppSettings.Changed → 侧栏重建 → 选中项被重设；
+            // 若不加守卫，每敲一个字符都会重新导航、销毁正在输入的页面
+            //（焦点丢失、按键落入虚空、预览反复重置为「正在连接」）。
+            if (_currentPageKind == row.Kind) return;
+            _currentPageKind = row.Kind;
             ContentFrame.Navigate(typeof(ProviderPage), row.Kind);
         }
     }
