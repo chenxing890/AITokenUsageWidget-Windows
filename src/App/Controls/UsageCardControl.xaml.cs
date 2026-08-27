@@ -7,7 +7,7 @@ using Microsoft.UI.Xaml.Media;
 namespace AITokenUsageWidget.App.Controls;
 
 /// <summary>
-/// 供应商用量卡片（FR-2 / §3.4）：App 内嵌预览使用，与小组件卡片内容一致。
+/// 供应商用量卡片（FR-2 / §3.4，对齐 macOS ProviderCardView）：App 内嵌预览使用，与小组件卡片内容一致。
 /// </summary>
 public sealed partial class UsageCardControl : UserControl
 {
@@ -44,13 +44,17 @@ public sealed partial class UsageCardControl : UserControl
         Visibility = Visibility.Visible;
 
         var brand = (SolidColorBrush)Application.Current.Resources[$"Brand{usage.Kind}"];
-        BrandBar.Background = brand;
-        Chip.Background = brand;
-        ChipIcon.Glyph = usage.Kind switch
+        Chip.Kind = usage.Kind;
+        BrandBar.Background = new LinearGradientBrush
         {
-            ProviderKind.DeepSeek => "\uEC4C",
-            ProviderKind.Kimi => "\uE708",
-            _ => "\uEF83",
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(0, 1),
+            GradientStops =
+            {
+                new GradientStop { Color = brand.Color, Offset = 0 },
+                // macOS：accentColor → accentColor.opacity(0.45)
+                new GradientStop { Color = Windows.UI.Color.FromArgb(115, brand.Color.R, brand.Color.G, brand.Color.B), Offset = 1 },
+            },
         };
         NameText.Text = usage.DisplayName;
         StatusDot.Fill = StatusColor(usage);
@@ -76,6 +80,7 @@ public sealed partial class UsageCardControl : UserControl
         row.Children.Add(new TextBlock
         {
             Text = usage.CurrencySymbol,
+            FontSize = 14,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 2, 4),
             Foreground = SecondaryBrush(),
@@ -93,7 +98,7 @@ public sealed partial class UsageCardControl : UserControl
             BodyPanel.Children.Add(new TextBlock
             {
                 Text = $"赠送 {usage.CurrencySymbol}{Format.Amount(granted)} · 充值 {usage.CurrencySymbol}{Format.Amount(toppedUp)}",
-                Style = Microsoft.UI.Xaml.Application.Current.Resources["CaptionTextBlockStyle"] as Style,
+                FontSize = 11,
                 Foreground = TertiaryBrush(),
             });
         }
@@ -106,67 +111,96 @@ public sealed partial class UsageCardControl : UserControl
         {
             if (window.UsedPercent is not { } percent)
             {
-                // 无百分比窗口（如「30 天累计」）：单行文本
+                // 无百分比窗口（如「30 天累计」）：单行「标题 + 数值」
                 var line = new Grid();
-                line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
                 line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
-                line.Children.Add(Caption(window.Title, secondary: true, 0));
-                line.Children.Add(new Border());
-                var value = Caption(window.UsedText ?? "--", secondary: false, 2);
-                value.Foreground = TertiaryBrush();
+                var title = SmallText(window.Title, SecondaryBrush());
+                line.Children.Add(title);
+                var value = SmallText(window.UsedText ?? "--", TertiaryBrush());
+                Grid.SetColumn(value, 1);
                 line.Children.Add(value);
                 BodyPanel.Children.Add(line);
                 continue;
             }
 
-            // 标题行：窗口名 + 用量文本 + 百分比 + 倒计时（五列）
+            // 标题行：窗口名 + 用量文本 + 百分比 + 倒计时
             var head = new Grid();
-            for (var i = 0; i < 5; i++)
-            {
-                head.ColumnDefinitions.Add(i == 1
-                    ? new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
-                    : new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
-            }
-            head.Children.Add(Caption(window.Title, secondary: true, 0));
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
 
-            var nextColumn = 2;
+            head.Children.Add(SmallText(window.Title, SecondaryBrush()));
+
             if (!string.IsNullOrEmpty(window.UsedText))
             {
-                var text = Caption(window.UsedText, secondary: true, nextColumn++);
-                text.Foreground = TertiaryBrush();
-                text.Margin = new Thickness(0, 0, 8, 0);
-                head.Children.Add(text);
+                var used = SmallText(window.UsedText, TertiaryBrush());
+                used.Margin = new Thickness(0, 0, 6, 0);
+                Grid.SetColumn(used, 2);
+                head.Children.Add(used);
             }
 
-            head.Children.Add(new TextBlock
+            var percentText = new TextBlock
             {
                 Text = $"{Format.Percent(percent)}%",
+                FontSize = 11,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Grid.Column = nextColumn++,
-            });
-
+            };
             var countdown = Format.ResetCountdown(window.ResetTime, now);
             if (countdown.Length > 0)
             {
-                var timer = Caption(countdown, secondary: true, nextColumn);
-                timer.Foreground = TertiaryBrush();
-                timer.Margin = new Thickness(8, 0, 0, 0);
+                percentText.Margin = new Thickness(0, 0, 6, 0);
+                Grid.SetColumn(percentText, 3);
+                head.Children.Add(percentText);
+
+                // 倒计时：小历史图标 + 文本（对齐 macOS clock.arrow.circlepath）
+                var timer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 3 };
+                timer.Children.Add(new FontIcon
+                {
+                    Glyph = "\uE81C", // History
+                    FontSize = 9,
+                    Foreground = TertiaryBrush(),
+                });
+                timer.Children.Add(SmallText(countdown, TertiaryBrush()));
+                Grid.SetColumn(timer, 4);
                 head.Children.Add(timer);
+            }
+            else
+            {
+                Grid.SetColumn(percentText, 4);
+                head.Children.Add(percentText);
             }
 
             BodyPanel.Children.Add(head);
 
-            // 进度条（用量级别色：≥80 红 / ≥50 橙 / 其余绿）
-            BodyPanel.Children.Add(new ProgressBar
-            {
-                Value = Math.Clamp(percent, 0, 100),
-                Maximum = 100,
-                Height = 4,
-                CornerRadius = new CornerRadius(2),
-                Foreground = LevelBrush(percent),
-            });
+            // 进度条：4px 圆角轨道 + 用量级别色填充（≥80 红 / ≥50 橙 / 其余绿）
+            BodyPanel.Children.Add(ProgressTrack(percent));
         }
+    }
+
+    private static Grid ProgressTrack(double percent)
+    {
+        var grid = new Grid { Height = 4 };
+        grid.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(2),
+            Background = TrackBrush(),
+        });
+        var clamped = Math.Clamp(percent, 0, 100);
+        if (clamped > 0)
+        {
+            var fill = new Border
+            {
+                CornerRadius = new CornerRadius(2),
+                Background = LevelBrush(clamped),
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            grid.SizeChanged += (_, e) => fill.Width = e.NewSize.Width * clamped / 100.0;
+            grid.Children.Add(fill);
+        }
+        return grid;
     }
 
     private void AddHint(string text, bool secondary, bool error = false)
@@ -174,24 +208,19 @@ public sealed partial class UsageCardControl : UserControl
         var hint = new TextBlock
         {
             Text = text,
-            Style = Microsoft.UI.Xaml.Application.Current.Resources["CaptionTextBlockStyle"] as Style,
+            FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
             Foreground = error ? new SolidColorBrush(Microsoft.UI.Colors.OrangeRed) : SecondaryBrush(),
         };
         BodyPanel.Children.Add(hint);
     }
 
-    private TextBlock Caption(string text, bool secondary, int column)
+    private static TextBlock SmallText(string text, Brush foreground) => new()
     {
-        var block = new TextBlock
-        {
-            Text = text,
-            Style = Microsoft.UI.Xaml.Application.Current.Resources["CaptionTextBlockStyle"] as Style,
-            Foreground = secondary ? SecondaryBrush() : null,
-            Grid.Column = column,
-        };
-        return block;
-    }
+        Text = text,
+        FontSize = 11,
+        Foreground = foreground,
+    };
 
     private Brush StatusColor(ProviderUsage usage) => usage.State switch
     {
@@ -212,6 +241,9 @@ public sealed partial class UsageCardControl : UserControl
         };
         return new SolidColorBrush(color);
     }
+
+    private static Brush TrackBrush() =>
+        (Brush)Microsoft.UI.Xaml.Application.Current.Resources["SubtleFillColorTertiaryBrush"];
 
     private Brush SecondaryBrush() =>
         (Brush)Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorSecondaryBrush"];

@@ -28,7 +28,7 @@ internal static class WidgetComInterop
             if (riid == typeof(AiWidgetProvider).GUID
                 || riid == new Guid("00000000-0000-0000-C000-000000000046")) // IUnknown
             {
-                ppvObject = MarshalInspectable<IWidgetProvider>.FromManaged(_create());
+                ppvObject = MarshalInspectable<IWidgetProvider>.FromManaged((IWidgetProvider)_create());
                 return 0;
             }
             Marshal.ThrowExceptionForHR(-2147467262); // E_NOINTERFACE

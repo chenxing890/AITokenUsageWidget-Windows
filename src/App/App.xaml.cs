@@ -1,6 +1,8 @@
 using AITokenUsageWidget.App.Services;
 using AITokenUsageWidget.Shared;
+using AITokenUsageWidget.Shared.Models;
 using AITokenUsageWidget.Shared.Storage;
+using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
 using Windows.ApplicationModel.Activation;
 
@@ -22,7 +24,7 @@ public partial class App : Application
         InitializeComponent();
     }
 
-    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
         L10n.UseSystemLanguage();
         AppSettings.Initialize();

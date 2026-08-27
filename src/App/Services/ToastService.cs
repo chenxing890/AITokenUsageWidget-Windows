@@ -28,16 +28,19 @@ public static class ToastService
     {
         try
         {
-            var builder = new AppNotificationBuilder()
-                .AddText(alert.Title, new AppNotificationTextProperties().SetMaxLines(1))
-                .AddText(alert.Body)
-                .SetInvokeUri(new Uri(
-                    $"aitokenusagewidget://provider/{alert.Kind.KindId()}"));
-            AppNotificationManager.Default.Show(builder.BuildNotification());
+            // AppNotificationBuilder 不支持设置 launch 协议 URI，直接构建 Toast XML
+            var uri = $"aitokenusagewidget://provider/{alert.Kind.KindId()}";
+            var xml =
+                $"<toast launch=\"{Escape(uri)}\"><visual><binding template=\"ToastGeneric\">" +
+                $"<text>{Escape(alert.Title)}</text><text>{Escape(alert.Body)}</text>" +
+                "</binding></visual></toast>";
+            AppNotificationManager.Default.Show(new AppNotification(xml));
         }
         catch (Exception)
         {
             // Toast 失败不影响刷新流程
         }
     }
+
+    private static string Escape(string value) => System.Security.SecurityElement.Escape(value) ?? value;
 }

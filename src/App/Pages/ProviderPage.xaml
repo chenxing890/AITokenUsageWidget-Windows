@@ -7,91 +7,127 @@
     xmlns:controls="using:AITokenUsageWidget.App.Controls">
 
     <ScrollViewer Padding="24,16,24,24" VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+        <StackPanel Spacing="16" MaxWidth="620" HorizontalAlignment="Left">
 
-            <!-- 头部 -->
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <FontIcon x:Name="HeaderIcon" FontSize="22" />
-                <StackPanel>
-                    <TextBlock x:Name="HeaderTitle" Style="{StaticResource TitleTextBlockStyle}" />
-                    <TextBlock x:Name="HeaderSubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <!-- 头部（对齐 macOS ProviderDetailColumn）：大图标 + 名称 + 副标题 + 右侧启用开关 -->
+            <Grid>
+                <StackPanel Orientation="Horizontal" Spacing="14">
+                    <controls:ProviderChip x:Name="HeaderChip" ChipSize="46" IconSize="21" />
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="HeaderTitle" FontSize="22" FontWeight="Bold" />
+                        <TextBlock x:Name="HeaderSubtitle" FontSize="14"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
+                <ToggleSwitch x:Name="EnableToggle" Header="" OnContent="" OffContent=""
+                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                              Toggled="OnEnableToggled" />
+            </Grid>
 
-            <muxc:InfoBar x:Name="TestInfoBar" IsOpen="False" IsClosable="True" />
-
-            <!-- 配置卡片 -->
-            <Border Style="{StaticResource CardBorder}">
-                <StackPanel Spacing="14">
+            <!-- 未启用提示（对齐 macOS「未启用」GroupCard） -->
+            <Border x:Name="DisabledCard" Style="{StaticResource GroupCard}" Visibility="Collapsed">
+                <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ToggleSwitch x:Name="EnableToggle" Header="启用此供应商"
-                                      OnContent="启用" OffContent="停用"
-                                      Toggled="OnEnableToggled" />
-                        <muxc:InfoBadge x:Name="EnabledBadge" Visibility="Collapsed" VerticalAlignment="Bottom" />
+                        <FontIcon Glyph="&#xE946;" FontSize="14"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="未启用" Style="{StaticResource GroupCardHeaderText}" />
+                    </StackPanel>
+                    <TextBlock x:Name="DisabledHint" FontSize="14"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <!-- 接口配置（对齐 macOS GroupCard：内置地址提示 + API Key + 显示名 + Kimi Cookie） -->
+            <Border x:Name="ConfigCard" Style="{StaticResource GroupCard}" Visibility="Collapsed">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE753;" FontSize="14"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="接口配置" Style="{StaticResource GroupCardHeaderText}" />
                     </StackPanel>
 
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="API Key" />
+                    <TextBlock x:Name="BuiltInUrlHint" Style="{StaticResource HintText}"
+                               IsTextSelectionEnabled="True" />
+
+                    <StackPanel Spacing="5">
+                        <TextBlock x:Name="ApiKeyLabel" Style="{StaticResource FieldLabelText}" />
                         <PasswordBox x:Name="ApiKeyBox" PasswordRevealMode="Peek"
                                      PlaceholderText="sk-..."
                                      PasswordChanged="OnApiKeyChanged" />
-                        <TextBlock x:Name="ApiKeyHint" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                   Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock x:Name="NameLabel" Style="{StaticResource FieldLabelText}" />
+                        <TextBox x:Name="NameBox" TextChanged="OnNameChanged" />
                     </StackPanel>
 
                     <!-- kimi-auth Cookie（仅 Kimi 显示） -->
-                    <StackPanel x:Name="CookieSection" Spacing="4" Visibility="Collapsed">
-                        <TextBlock Text="kimi-auth Cookie（可选，用于月度总额，非官方接口）" />
+                    <StackPanel x:Name="CookieSection" Spacing="5" Visibility="Collapsed">
+                        <TextBlock Text="kimi-auth Cookie（可选 · 用于月度总用量）"
+                                   Style="{StaticResource FieldLabelText}" />
                         <PasswordBox x:Name="CookieBox" PasswordRevealMode="Peek"
                                      PlaceholderText="kimi-auth=..."
                                      PasswordChanged="OnCookieChanged" />
-                    </StackPanel>
-
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="自定义显示名（留空用默认）" />
-                            <TextBox x:Name="NameBox" PlaceholderText="默认显示名"
-                                     TextChanged="OnNameChanged" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Spacing="4">
-                            <TextBlock Text="接口根地址（留空用默认）" />
-                            <TextBox x:Name="BaseURLBox" PlaceholderText="https://..."
-                                     TextChanged="OnBaseURLChanged" />
-                        </StackPanel>
-                    </Grid>
-
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ProgressRing x:Name="TestingRing" IsActive="False" Width="20" Height="20"
-                                      Visibility="Collapsed" />
-                        <Button x:Name="TestButton" Content="测试连接" Style="{StaticResource AccentButtonStyle}"
-                                Click="OnTestConnection" />
-                        <Button Content="打开控制台" Click="OnOpenConsole" />
+                        <TextBlock Style="{StaticResource HintText}"
+                                   Text="浏览器登录 kimi.com → 开发者工具 → Application → Cookies 中复制；非官方接口，留空则不显示月度总额。" />
                     </StackPanel>
                 </StackPanel>
             </Border>
 
-            <!-- 内嵌预览（FR-3）：实时渲染小组件卡片 -->
-            <Border Style="{StaticResource CardBorder}">
-                <StackPanel Spacing="10">
+            <!-- 连接测试（对齐 macOS GroupCard：品牌色测试按钮 + 打开控制台 + 行内结果） -->
+            <Border x:Name="TestCard" Style="{StaticResource GroupCard}" Visibility="Collapsed">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE701;" FontSize="14"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="连接测试" Style="{StaticResource GroupCardHeaderText}" />
+                    </StackPanel>
+
                     <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="小组件预览" Style="{StaticResource SubtitleTextBlockStyle}" />
-                        <!-- 模拟数据角标：橙色胶囊（§3.4） -->
-                        <Border x:Name="SimulatedBadge" Grid.Column="1" Visibility="Collapsed"
-                                Background="#F97316" CornerRadius="8" Padding="8,2">
-                            <TextBlock Text="模拟" FontSize="11" Foreground="White" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="TestButton" Content="测试连接"
+                                    Click="OnTestConnection" />
+                            <ProgressRing x:Name="TestingRing" IsActive="False" Width="20" Height="20"
+                                          Visibility="Collapsed" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <HyperlinkButton x:Name="ConsoleLink" Content="打开控制台"
+                                         HorizontalAlignment="Right" VerticalAlignment="Center"
+                                         Click="OnOpenConsole" />
+                    </Grid>
+
+                    <!-- 测试结果（行内：成功绿勾 / 缺 Key 橙钥匙 / 失败红叉） -->
+                    <StackPanel x:Name="TestResultPanel" Orientation="Horizontal" Spacing="8"
+                                Visibility="Collapsed">
+                        <FontIcon x:Name="TestResultIcon" FontSize="14" />
+                        <TextBlock x:Name="TestResultText" FontSize="14" TextWrapping="Wrap"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 小组件预览（对齐 macOS GroupCard：实时渲染卡片 + 「模拟」角标） -->
+            <Border Style="{StaticResource GroupCard}">
+                <StackPanel Spacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xECA5;" FontSize="14"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="小组件预览" Style="{StaticResource GroupCardHeaderText}" />
+                    </StackPanel>
+
+                    <Grid>
+                        <controls:UsageCardControl x:Name="PreviewCard" />
+                        <!-- 模拟数据角标：橙色胶囊（§3.4），叠在卡片右上角 -->
+                        <Border x:Name="SimulatedBadge" Visibility="Collapsed"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6"
+                                Background="{ThemeResource SimulatedBadgeBrush}"
+                                CornerRadius="8" Padding="7,3">
+                            <TextBlock Text="模拟" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="White" />
                         </Border>
                     </Grid>
-                    <controls:UsageCardControl x:Name="PreviewCard" />
-                    <TextBlock x:Name="PreviewCaption" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                               Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+
+                    <TextBlock x:Name="PreviewCaption" Style="{StaticResource HintText}" />
                 </StackPanel>
             </Border>
 

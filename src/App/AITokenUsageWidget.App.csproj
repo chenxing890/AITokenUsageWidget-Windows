@@ -26,8 +26,6 @@
 
   <ItemGroup>
     <Content Include="Assets\**\*.png" />
-    <PRIResource Include="Strings\zh-CN\Resources.resw" />
-    <PRIResource Include="Strings\en-US\Resources.resw" />
   </ItemGroup>
 
   <ItemGroup>

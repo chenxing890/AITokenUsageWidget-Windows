@@ -8,9 +8,9 @@
   IgnorableNamespaces="uap uap3 com rescap">
 
   <Identity
-    Name="Chenxing.AITokenUsageWidget"
-    Publisher="CN=chenxing890"
-    Version="1.0.0.0" />
+     Name="Chenxing.AITokenUsageWidget"
+     Publisher="CN=chenxing890"
+     Version="1.0.1.0" />
 
   <Properties>
     <DisplayName>AI 模型用量</DisplayName>
@@ -62,8 +62,9 @@
         </com:Extension>
 
         <!-- 小组件接入 Widgets Board（中 / 大两种尺寸，FR-2） -->
-        <uap3:Extension Category="windows.appExtension" DisplayName="AI 模型用量" Id="com.chenxing.aitokenusagewidget" PublicFolder="Public">
-          <uap3:Properties>
+        <uap3:Extension Category="windows.appExtension">
+          <uap3:AppExtension Name="com.microsoft.windows.widgets" Id="com.chenxing.aitokenusagewidget" PublicFolder="Public" DisplayName="AI 模型用量">
+            <uap3:Properties>
             <WidgetProvider>
               <ProviderIcons>
                 <Icon Path="Assets\StoreLogo.png" />
@@ -83,16 +84,20 @@
                     </Capability>
                   </Capabilities>
                   <ThemeResources>
-                    <Icons>
-                      <Icon Path="Assets\WidgetIcon.png" />
-                    </Icons>
-                    <LightMode />
-                    <DarkMode />
-                  </ThemeResources>
+                      <Icons>
+                        <Icon Path="Assets\WidgetIcon.png" />
+                      </Icons>
+                      <Screenshots>
+                        <Screenshot Path="Assets\WidgetIcon.png" DisplayAltText="AI 模型用量预览" />
+                      </Screenshots>
+                      <LightMode />
+                      <DarkMode />
+                    </ThemeResources>
                 </Definition>
               </Definitions>
             </WidgetProvider>
-          </uap3:Properties>
+            </uap3:Properties>
+          </uap3:AppExtension>
         </uap3:Extension>
       </Extensions>
     </Application>
