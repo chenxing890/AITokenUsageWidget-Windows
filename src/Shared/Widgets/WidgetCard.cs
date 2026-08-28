@@ -49,7 +49,9 @@ public static class WidgetCard
         else if (size == WidgetSize.Medium)
         {
             var dense = usages.Count >= 3; // 3 个供应商自动切换紧凑三列（FR-2）
-            var columns = usages.Take(3).Select(usage => Col("stretch", DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark))).ToArray();
+            // macOS 视觉：每个供应商一张独立小卡片（emphasis 主题底色）
+            var columns = usages.Take(3).Select(usage => Col("stretch",
+                [ProviderCard(DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark), first: true)])).ToArray();
             body.Add(new Dictionary<string, object?>
             {
                 ["type"] = "ColumnSet",
@@ -61,14 +63,18 @@ public static class WidgetCard
         {
             foreach (var (usage, index) in usages.Take(4).Select((u, i) => (u, i)))
             {
-                body.Add(new Dictionary<string, object?>
-                {
-                    ["type"] = "Container",
-                    ["separator"] = index > 0,
-                    ["spacing"] = index > 0 ? "Padding" : "ExtraLarge",
-                    ["items"] = LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark),
-                });
+                // macOS 视觉：每个供应商一张独立卡片（emphasis 主题底色 + 卡片间距）
+                body.Add(ProviderCard(LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark), first: index == 0));
             }
+        }
+
+        // macOS 视觉：底部更新时间（右对齐、次色小字）
+        if (usages.Count > 0)
+        {
+            var latest = usages.Select(u => u.FetchedAt).Max().ToLocalTime();
+            body.Add(Text(L10n.Get("updatedAt", latest.ToString("HH:mm")),
+                size: "ExtraSmall", isSubtle: true, color: textColor,
+                horizontalAlignment: "Right", spacing: "Medium"));
         }
 
         var card = new Dictionary<string, object?>
@@ -103,6 +109,15 @@ public static class WidgetCard
     }
 
     public static string EmptyData => "{}";
+
+    /// <summary>供应商独立卡片容器：emphasis 主题底色（macOS 卡片感）+ 卡片间距。</summary>
+    private static object ProviderCard(object[] items, bool first) => new Dictionary<string, object?>
+    {
+        ["type"] = "Container",
+        ["style"] = "emphasis",
+        ["spacing"] = first ? "None" : "Medium",
+        ["items"] = items,
+    };
 
     // ---- Medium：1–2 个供应商宽松双列；3 个自动 dense 三列 ----
 
@@ -152,7 +167,7 @@ public static class WidgetCard
                     ["items"] = new object[]
                     {
                         Text(usage.DisplayName, size: nameSize,
-                            weight: "Bolder", color: textColor, wrap: false),
+                            weight: "Default", color: textColor, wrap: false),
                     },
                 },
             },
@@ -197,7 +212,7 @@ public static class WidgetCard
                         usage.TotalBalance is { } total
                             ? $"{usage.CurrencySymbol} {Format.Amount(total)}"
                             : "--",
-                        size: dense ? "Medium" : "ExtraLarge", weight: "Bolder", color: textColor, wrap: false));
+                        size: dense ? "Medium" : "ExtraLarge", weight: "Default", color: textColor, wrap: false));
                     if (!dense)
                         items.Add(BalanceDetail(usage, textColor));
                 }
@@ -267,7 +282,7 @@ public static class WidgetCard
                         usage.TotalBalance is { } total
                             ? $"{usage.CurrencySymbol} {Format.Amount(total)}"
                             : "--",
-                        size: "ExtraLarge", weight: "Bolder", color: textColor));
+                        size: "ExtraLarge", weight: "Default", color: textColor));
                     items.Add(BalanceDetail(usage, textColor));
                 }
                 else
@@ -334,7 +349,7 @@ public static class WidgetCard
                     ["width"] = "auto",
                     ["items"] = new object[]
                     {
-                        Text(tail, size: "ExtraSmall", weight: "Bolder", color: textColor, wrap: false),
+                        Text(tail, size: "ExtraSmall", weight: "Default", color: textColor, wrap: false),
                     },
                 },
             },

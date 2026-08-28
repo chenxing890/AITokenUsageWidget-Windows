@@ -53,6 +53,8 @@ public class WidgetCardTests
         // System.Text.Json 会转义为代理对（🐋 = D83D DC0B），Board 端正常解码
         Assert.Contains("\\uD83D\\uDC0B", json);
         Assert.DoesNotContain("\"type\":\"Image\"", json); // 卡片不含任何图片元素
+        Assert.Contains("\"style\":\"emphasis\"", json);   // macOS：每供应商独立卡片底色
+        Assert.Contains("更新于", json);                    // macOS：底部更新时间
     }
 
     [Fact]
