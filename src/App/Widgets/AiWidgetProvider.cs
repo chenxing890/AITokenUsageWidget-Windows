@@ -21,6 +21,7 @@ public sealed class AiWidgetProvider : IWidgetProvider
 
     public AiWidgetProvider()
     {
+        WidgetImageServer.Start();
         RecoverRunningWidgets();
     }
 

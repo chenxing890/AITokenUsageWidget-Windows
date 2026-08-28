@@ -10,7 +10,7 @@
   <Identity
      Name="Chenxing.AITokenUsageWidget"
      Publisher="CN=AITokenUsageWidget Dev"
-     Version="1.0.34.0" />
+     Version="1.0.39.0" />
 
   <Properties>
     <DisplayName>AI 模型用量</DisplayName>

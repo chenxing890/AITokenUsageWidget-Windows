@@ -177,6 +177,33 @@ public class WidgetCardTests
     }
 
     [Fact]
+    public void WithImageServer_BarsAndIconsUseLocalHttpImages()
+    {
+        const string server = "http://127.0.0.1:49231";
+        var json = WidgetCard.Build(WidgetSize.Large, Placeholders.All(),
+            ThemePreference.System, systemDark: true, Now, server);
+
+        // 进度条：胶囊条 PNG 由本地服务提供，固有尺寸 == 声明尺寸（Large 480x4）
+        Assert.Contains($"\"url\":\"{server}/bar?", json);
+        Assert.Contains("\"width\":\"480px\"", json);
+        Assert.Contains("\"height\":\"4px\"", json);
+        Assert.Contains("dark=1", json); // 系统深色 → 深轨道
+        // 品牌图标：18px 固有尺寸
+        Assert.Contains($"\"url\":\"{server}/icon/kimi?s=18\"", json);
+        Assert.Contains($"\"url\":\"{server}/icon/deepseek?s=18\"", json);
+        Assert.DoesNotContain("█", json); // 不再使用文本块兜底
+    }
+
+    [Fact]
+    public void WithoutImageServer_FallsBackToTextBar()
+    {
+        var json = WidgetCard.Build(WidgetSize.Large, Placeholders.All(),
+            ThemePreference.System, systemDark: true, Now, imageBaseUrl: null);
+        Assert.Contains("█", json);
+        Assert.DoesNotContain("/bar?", json);
+    }
+
+    [Fact]
     public void LevelColor_MatchesUsageCardControlLevels()
     {
         Assert.Equal("Attention", WidgetCard.LevelColor(80)); // 红

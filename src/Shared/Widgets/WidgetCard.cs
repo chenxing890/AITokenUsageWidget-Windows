@@ -16,14 +16,11 @@ public enum WidgetSize
 /// 输出完整字面卡片 JSON（Template 与 Data 由本方法合成，Data 固定为 "{}"）。
 ///
 /// 平台约束（实测 Windows Widgets Board，2026-08）：Board 渲染器不加载任何
-/// data: URI 图片（探针卡片 + 全屏像素扫描验证：显式像素尺寸 / size=Small /
-/// 固有尺寸三种声明方式均不渲染；连 200×200 纯色块也无一像素）。因此卡片
-/// 不使用任何 Image / backgroundImage：
-/// - 品牌图标 → emoji 文本（🐋/🌙/🤖，随文本渲染，天然支持明暗主题）；
-/// - 进度条 → 双色「█」块 ColumnSet（填充段按用量级别着色 Good/Warning/
-///   Attention，轨道段 isSubtle 灰），对齐 UsageCardControl 的级别色板；
-/// - 文字颜色始终 Default，由 Board 按系统主题渲染（强制 Light/Dark 文字在
-///   背景图不渲染时会对比度失控）。
+/// data: URI 图片，但能加载 http(s) 图片。因此图片（胶囊进度条 / 品牌图标）由
+/// Provider 进程内嵌的 127.0.0.1 图片服务提供（imageBaseUrl 参数）；服务不可用
+/// 时退化为纯文本渲染（emoji 图标 + 双色「█」块进度条）。
+/// 文字颜色始终 Default，由 Board 按系统主题渲染（强制 Light/Dark 文字在
+/// 背景不可控时会对比度失控）。
 /// </summary>
 public static class WidgetCard
 {
@@ -32,7 +29,8 @@ public static class WidgetCard
         IReadOnlyList<ProviderUsage> usages,
         ThemePreference theme,
         bool systemDark,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? imageBaseUrl = null)
     {
         const string textColor = "Default"; // 见类注释：不强制明暗文字色
 
@@ -51,7 +49,7 @@ public static class WidgetCard
         else if (size == WidgetSize.Medium)
         {
             var dense = usages.Count >= 3; // 3 个供应商自动切换紧凑三列（FR-2）
-            var columns = usages.Take(3).Select(usage => Col("stretch", DenseOrCompactItems(usage, dense, textColor, now))).ToArray();
+            var columns = usages.Take(3).Select(usage => Col("stretch", DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark))).ToArray();
             body.Add(new Dictionary<string, object?>
             {
                 ["type"] = "ColumnSet",
@@ -68,7 +66,7 @@ public static class WidgetCard
                     ["type"] = "Container",
                     ["separator"] = index > 0,
                     ["spacing"] = index > 0 ? "Padding" : "ExtraLarge",
-                    ["items"] = LargeProviderItems(usage, textColor, now),
+                    ["items"] = LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark),
                 });
             }
         }
@@ -108,11 +106,65 @@ public static class WidgetCard
 
     // ---- Medium：1–2 个供应商宽松双列；3 个自动 dense 三列 ----
 
-    /// <summary>emoji 图标 + 名称标题行（Board 不渲染 data: 图片，emoji 随文本渲染）。</summary>
-    private static object ProviderHeader(ProviderUsage usage, bool dense, string textColor, bool large = false) =>
-        Text($"{EmojiFor(usage.Kind)} {usage.DisplayName}",
-            size: dense ? "ExtraSmall" : large ? "Medium" : "Small",
-            weight: "Bolder", color: textColor, wrap: false);
+    /// <summary>
+    /// 图标 + 名称标题行（对齐 macOS 卡片头部）。有图片服务时用真实品牌图标
+    /// （固有尺寸 == 声明尺寸，杜绝裁剪）；无服务时退化为 emoji 文本。
+    /// </summary>
+    private static object ProviderHeader(ProviderUsage usage, bool dense, string textColor,
+        bool large = false, string? imageBaseUrl = null)
+    {
+        var nameSize = dense ? "ExtraSmall" : large ? "Medium" : "Small";
+        if (imageBaseUrl == null)
+        {
+            return Text($"{EmojiFor(usage.Kind)} {usage.DisplayName}",
+                size: nameSize, weight: "Bolder", color: textColor, wrap: false);
+        }
+
+        var iconSize = dense ? 14 : 18;
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "ColumnSet",
+            ["spacing"] = "None",
+            ["columns"] = new object[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["type"] = "Column",
+                    ["width"] = "auto",
+                    ["verticalContentAlignment"] = "Center",
+                    ["items"] = new object[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "Image",
+                            ["url"] = $"{imageBaseUrl}/icon/{IconName(usage.Kind)}?s={iconSize}",
+                            ["width"] = $"{iconSize}px",
+                            ["height"] = $"{iconSize}px",
+                        },
+                    },
+                },
+                new Dictionary<string, object?>
+                {
+                    ["type"] = "Column",
+                    ["width"] = "stretch",
+                    ["spacing"] = "Small",
+                    ["verticalContentAlignment"] = "Center",
+                    ["items"] = new object[]
+                    {
+                        Text(usage.DisplayName, size: nameSize,
+                            weight: "Bolder", color: textColor, wrap: false),
+                    },
+                },
+            },
+        };
+    }
+
+    private static string IconName(ProviderKind kind) => kind switch
+    {
+        ProviderKind.DeepSeek => "deepseek",
+        ProviderKind.Kimi => "kimi",
+        _ => "glm",
+    };
 
     /// <summary>品牌 emoji（对齐 macOS 品牌图标的位置语义）。</summary>
     public static string EmojiFor(ProviderKind kind) => kind switch
@@ -122,11 +174,11 @@ public static class WidgetCard
         _ => "🤖",
     };
 
-    private static object[] DenseOrCompactItems(ProviderUsage usage, bool dense, string textColor, DateTimeOffset now)
+    private static object[] DenseOrCompactItems(ProviderUsage usage, bool dense, string textColor, DateTimeOffset now, string? imageBaseUrl, bool dark)
     {
         var items = new List<object>
         {
-            ProviderHeader(usage, dense, textColor),
+            ProviderHeader(usage, dense, textColor, imageBaseUrl: imageBaseUrl),
         };
 
         switch (usage.State)
@@ -162,14 +214,14 @@ public static class WidgetCard
                     }
                     foreach (var window in windows)
                     {
-                        items.AddRange(DenseWindowItems(window, textColor));
+                        items.AddRange(DenseWindowItems(window, textColor, imageBaseUrl, dark));
                     }
                 }
                 else
                 {
                     foreach (var window in usage.Windows)
                     {
-                        items.AddRange(WindowItems(window, textColor, now, segments: 16)); // Medium 双列
+                        items.AddRange(WindowItems(window, textColor, now, barWidth: 140, imageBaseUrl, dark)); // Medium 双列
                     }
                 }
                 break;
@@ -177,8 +229,8 @@ public static class WidgetCard
         return items.ToArray();
     }
 
-    /// <summary>dense 窗口行：短标题 + 百分比 + 双色块细进度条；无百分比窗口退化为单行文本。</summary>
-    private static IEnumerable<object> DenseWindowItems(UsageWindow window, string textColor)
+    /// <summary>dense 窗口行：短标题 + 百分比 + 胶囊进度条（无服务时双色块）；无百分比窗口退化为单行文本。</summary>
+    private static IEnumerable<object> DenseWindowItems(UsageWindow window, string textColor, string? imageBaseUrl, bool dark)
     {
         if (window.UsedPercent is not { } percent)
         {
@@ -188,16 +240,16 @@ public static class WidgetCard
         }
         yield return Text($"{window.ShortTitle}  {Format.Percent(percent)}%",
             size: "ExtraSmall", isSubtle: true, color: textColor, wrap: false);
-        yield return BarBlocks(percent, segments: 8); // dense 三列窄栏
+        yield return ProgressBar(percent, width: 84, height: 3, segments: 8, imageBaseUrl, dark); // dense 三列窄栏
     }
 
     // ---- Large：每个供应商一块，含进度条与重置倒计时 ----
 
-    private static object[] LargeProviderItems(ProviderUsage usage, string textColor, DateTimeOffset now)
+    private static object[] LargeProviderItems(ProviderUsage usage, string textColor, DateTimeOffset now, string? imageBaseUrl, bool dark)
     {
         var items = new List<object>
         {
-            ProviderHeader(usage, dense: false, textColor, large: true),
+            ProviderHeader(usage, dense: false, textColor, large: true, imageBaseUrl: imageBaseUrl),
         };
 
         switch (usage.State)
@@ -222,7 +274,7 @@ public static class WidgetCard
                 {
                     foreach (var window in usage.Windows)
                     {
-                        items.AddRange(WindowItems(window, textColor, now, segments: 24)); // Large 整宽
+                        items.AddRange(WindowItems(window, textColor, now, barWidth: 480, imageBaseUrl, dark)); // Large 整宽
                     }
                 }
                 break;
@@ -243,7 +295,7 @@ public static class WidgetCard
     /// percent 窗口 → 标题行（窗口名左对齐 + 百分比右对齐，可附带用量文本与倒计时）+ 双色块进度条；
     /// 否则单行「标题 + 绝对值」文本。
     /// </summary>
-    private static IEnumerable<object> WindowItems(UsageWindow window, string textColor, DateTimeOffset now, int segments)
+    private static IEnumerable<object> WindowItems(UsageWindow window, string textColor, DateTimeOffset now, int barWidth, string? imageBaseUrl, bool dark)
     {
         if (window.UsedPercent is not { } percent)
         {
@@ -287,7 +339,32 @@ public static class WidgetCard
                 },
             },
         };
-        yield return BarBlocks(percent, segments);
+        yield return ProgressBar(percent, barWidth, height: 4, segments: 24, imageBaseUrl, dark);
+    }
+
+    /// <summary>
+    /// 进度条：有图片服务时用 macOS 风格胶囊条 PNG（127.0.0.1 本地服务，固有尺寸 ==
+    /// 声明尺寸，与 UsageCardControl.ProgressTrack 同 4px 圆角轨道 + 级别色填充）；
+    /// 服务不可用时退化为双色「█」块。
+    /// </summary>
+    private static object ProgressBar(double percent, int width, int height, int segments,
+        string? imageBaseUrl, bool dark)
+    {
+        if (imageBaseUrl != null)
+        {
+            var p = Math.Round(Math.Clamp(percent, 0, 100), 1)
+                .ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "Image",
+                ["url"] = $"{imageBaseUrl}/bar?p={p}&dark={(dark ? 1 : 0)}&w={width}&h={height}",
+                ["width"] = $"{width}px",
+                ["height"] = $"{height}px",
+                ["horizontalAlignment"] = "Left",
+                ["spacing"] = "Small",
+            };
+        }
+        return BarBlocks(percent, segments);
     }
 
     /// <summary>

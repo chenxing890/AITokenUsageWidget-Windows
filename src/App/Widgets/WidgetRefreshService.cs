@@ -190,7 +190,8 @@ public static class WidgetRefreshService
         try
         {
             var card = Shared.Widgets.WidgetCard.Build(
-                size, usages, theme, SystemIsDark(), DateTimeOffset.UtcNow);
+                size, usages, theme, SystemIsDark(), DateTimeOffset.UtcNow,
+                WidgetImageServer.BaseUrl);
             var options = new Microsoft.Windows.Widgets.Providers.WidgetUpdateRequestOptions(widgetId)
             {
                 Template = card,
@@ -209,9 +210,12 @@ public static class WidgetRefreshService
     {
         try
         {
-            var ui = new Windows.UI.ViewManagement.UISettings();
-            var background = ui.GetColorValue(Windows.UI.ViewManagement.UIColorType.Background);
-            return background.R < 128;
+            // UISettings.GetColorValue 在无 XamlUI 的进程里恒返回浅色，不可靠；
+            // 直接读系统主题注册表（0 = 深色），Board 背景跟随系统主题。
+            var value = Microsoft.Win32.Registry.GetValue(
+                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                "SystemUsesLightTheme", 1);
+            return value is int i && i == 0;
         }
         catch (Exception)
         {
