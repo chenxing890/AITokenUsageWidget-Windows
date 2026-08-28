@@ -49,9 +49,10 @@ public static class WidgetCard
         else if (size == WidgetSize.Medium)
         {
             var dense = usages.Count >= 3; // 3 个供应商自动切换紧凑三列（FR-2）
-            // macOS 视觉：每个供应商一张独立小卡片（emphasis 主题底色）
+            // macOS 视觉：每个供应商一张独立小卡片（逐行背景堆叠）
             var columns = usages.Take(3).Select(usage => Col("stretch",
-                [ProviderCard(DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark), first: true, imageBaseUrl, systemDark)])).ToArray();
+                ProviderCardRows(DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark),
+                    first: true, imageBaseUrl, systemDark))).ToArray();
             body.Add(new Dictionary<string, object?>
             {
                 ["type"] = "ColumnSet",
@@ -63,8 +64,10 @@ public static class WidgetCard
         {
             foreach (var (usage, index) in usages.Take(4).Select((u, i) => (u, i)))
             {
-                // macOS 视觉：每个供应商一张独立卡片（emphasis 主题底色 + 卡片间距）
-                body.Add(ProviderCard(LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark), first: index == 0, imageBaseUrl, systemDark));
+                // macOS 视觉：每个供应商一张独立卡片（逐行背景堆叠成卡）
+                body.AddRange(ProviderCardRows(
+                    LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark),
+                    first: index == 0, imageBaseUrl, systemDark));
             }
         }
 
@@ -111,29 +114,56 @@ public static class WidgetCard
     public static string EmptyData => "{}";
 
     /// <summary>
-    /// 供应商独立卡片容器（macOS 卡片感）：有图片服务时用圆角半透明背景图
-    /// （fillMode=Stretch 拉满容器，可见的模型区域划分）+ emphasis 兜底；
-    /// 无服务时仅 emphasis。
+    /// 供应商独立卡片（macOS 卡片感）。实测 Board 渲染器把 Container 的
+    /// backgroundImage 拉伸成「首行高度 × 内容宽度」的横带（与图片固有尺寸无关），
+    /// 无法整体铺底——因此每个内容行一个独立容器（各自带背景横带），行间
+    /// spacing=None 无缝堆叠成完整卡片；首行/末行各垫一个空行（圆角顶/底段）
+    /// 作为卡片上下边距。无图片服务时退化为单个 emphasis 容器。
     /// </summary>
-    private static object ProviderCard(object[] items, bool first, string? imageBaseUrl, bool dark)
+    private static object[] ProviderCardRows(object[] items, bool first, string? imageBaseUrl,
+        bool dark)
     {
-        var card = new Dictionary<string, object?>
+        if (imageBaseUrl == null)
+        {
+            return
+            [
+                new Dictionary<string, object?>
+                {
+                    ["type"] = "Container",
+                    ["style"] = "emphasis",
+                    ["spacing"] = first ? "None" : "Medium",
+                    ["items"] = items,
+                },
+            ];
+        }
+
+        var rows = new List<object>
+        {
+            CardRow("top", Text(" ", size: "ExtraSmall"), first ? "None" : "Medium",
+                imageBaseUrl, dark),
+        };
+        foreach (var item in items)
+        {
+            rows.Add(CardRow("mid", item, "None", imageBaseUrl, dark));
+        }
+        rows.Add(CardRow("bottom", Text(" ", size: "ExtraSmall"), "None", imageBaseUrl, dark));
+        return rows.ToArray();
+    }
+
+    /// <summary>卡片的一行：独立容器 + 对应分段（顶/中/底）背景横带。</summary>
+    private static object CardRow(string seg, object content, string spacing,
+        string imageBaseUrl, bool dark) =>
+        new Dictionary<string, object?>
         {
             ["type"] = "Container",
-            ["style"] = "emphasis",
-            ["spacing"] = first ? "None" : "Medium",
-            ["items"] = items,
-        };
-        if (imageBaseUrl != null)
-        {
-            card["backgroundImage"] = new Dictionary<string, object?>
+            ["spacing"] = spacing,
+            ["backgroundImage"] = new Dictionary<string, object?>
             {
-                ["url"] = $"{imageBaseUrl}/cardbg?dark={(dark ? 1 : 0)}",
+                ["url"] = $"{imageBaseUrl}/cardbg?dark={(dark ? 1 : 0)}&seg={seg}&v=4",
                 ["fillMode"] = "Stretch",
-            };
-        }
-        return card;
-    }
+            },
+            ["items"] = new[] { content },
+        };
 
     // ---- Medium：1–2 个供应商宽松双列；3 个自动 dense 三列 ----
 
@@ -168,7 +198,7 @@ public static class WidgetCard
                         new Dictionary<string, object?>
                         {
                             ["type"] = "Image",
-                            ["url"] = $"{imageBaseUrl}/icon/{IconName(usage.Kind)}?s={iconSize}",
+                            ["url"] = $"{imageBaseUrl}/icon/{IconName(usage.Kind)}?s={iconSize}&v=2",
                             ["width"] = $"{iconSize}px",
                             ["height"] = $"{iconSize}px",
                         },

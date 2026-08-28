@@ -190,11 +190,11 @@ public class WidgetCardTests
         Assert.Contains("\"width\":\"480px\"", json);
         Assert.Contains("\"height\":\"4px\"", json);
         Assert.Contains("dark=1", json); // 系统深色 → 深轨道
-        // 品牌图标：18px 固有尺寸
-        Assert.Contains($"\"url\":\"{server}/icon/kimi?s=18\"", json);
-        Assert.Contains($"\"url\":\"{server}/icon/deepseek?s=18\"", json);
-        // macOS：供应商卡片背景图（fillMode=Stretch）
-        Assert.Contains($"\"url\":\"{server}/cardbg?dark=1\"", json);
+        // 品牌图标：18px 固有尺寸（v=2 防 Board 图片缓存）
+        Assert.Contains($"\"url\":\"{server}/icon/kimi?s=18&v=2\"", json);
+        Assert.Contains($"\"url\":\"{server}/icon/deepseek?s=18&v=2\"", json);
+        // macOS：供应商卡片背景图（逐行分段堆叠）
+        Assert.Contains($"\"url\":\"{server}/cardbg?dark=1&seg=", json);
         Assert.Contains("\"fillMode\":\"Stretch\"", json);
         Assert.DoesNotContain("█", json); // 不再使用文本块兜底
     }
