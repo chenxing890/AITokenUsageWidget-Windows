@@ -193,6 +193,9 @@ public class WidgetCardTests
         // 品牌图标：18px 固有尺寸
         Assert.Contains($"\"url\":\"{server}/icon/kimi?s=18\"", json);
         Assert.Contains($"\"url\":\"{server}/icon/deepseek?s=18\"", json);
+        // macOS：供应商卡片背景图（fillMode=Stretch）
+        Assert.Contains($"\"url\":\"{server}/cardbg?dark=1\"", json);
+        Assert.Contains("\"fillMode\":\"Stretch\"", json);
         Assert.DoesNotContain("█", json); // 不再使用文本块兜底
     }
 

@@ -74,6 +74,7 @@ public static class WidgetImageServer
             byte[]? body = path switch
             {
                 "/bar" => RenderBar(query),
+                "/cardbg" => RenderCardBg(query),
                 "/icon/deepseek" or "/icon/kimi" or "/icon/glm" => RenderIcon(path, query),
                 _ => null,
             };
@@ -108,6 +109,36 @@ public static class WidgetImageServer
 
         var key = $"{p:F1}|{(dark ? 1 : 0)}|{w}|{h}";
         return BarCache.GetOrAdd(key, _ => DrawBar(w, h, Math.Clamp(p, 0, 100), dark));
+    }
+
+    /// <summary>
+    /// 供应商卡片背景：圆角半透明矩形 PNG（dark=白 7% / light=黑 5%，对齐 macOS
+    /// containerBackground 的浅底色卡片）。Board 的 emphasis 底色几乎不可见，
+    /// 用 backgroundImage + fillMode=Stretch 实现可见的模型区域划分。
+    /// </summary>
+    private static byte[] RenderCardBg(string query)
+    {
+        var dark = GetInt(query, "dark") == 1;
+        var key = $"cardbg|{(dark ? 1 : 0)}";
+        return BarCache.GetOrAdd(key, _ =>
+        {
+            const int size = 96;
+            const float radius = 6f;
+            using var bmp = new System.Drawing.Bitmap(size, size);
+            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var color = dark
+                    ? System.Drawing.Color.FromArgb(18, 255, 255, 255)
+                    : System.Drawing.Color.FromArgb(13, 0, 0, 0);
+                using var path = Capsule(0, 0, size, size, radius);
+                using var brush = new System.Drawing.SolidBrush(color);
+                g.FillPath(brush, path);
+            }
+            using var ms = new System.IO.MemoryStream();
+            bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            return ms.ToArray();
+        });
     }
 
     private static byte[] DrawBar(int width, int height, double percent, bool dark)

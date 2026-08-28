@@ -51,7 +51,7 @@ public static class WidgetCard
             var dense = usages.Count >= 3; // 3 个供应商自动切换紧凑三列（FR-2）
             // macOS 视觉：每个供应商一张独立小卡片（emphasis 主题底色）
             var columns = usages.Take(3).Select(usage => Col("stretch",
-                [ProviderCard(DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark), first: true)])).ToArray();
+                [ProviderCard(DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark), first: true, imageBaseUrl, systemDark)])).ToArray();
             body.Add(new Dictionary<string, object?>
             {
                 ["type"] = "ColumnSet",
@@ -64,7 +64,7 @@ public static class WidgetCard
             foreach (var (usage, index) in usages.Take(4).Select((u, i) => (u, i)))
             {
                 // macOS 视觉：每个供应商一张独立卡片（emphasis 主题底色 + 卡片间距）
-                body.Add(ProviderCard(LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark), first: index == 0));
+                body.Add(ProviderCard(LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark), first: index == 0, imageBaseUrl, systemDark));
             }
         }
 
@@ -110,14 +110,30 @@ public static class WidgetCard
 
     public static string EmptyData => "{}";
 
-    /// <summary>供应商独立卡片容器：emphasis 主题底色（macOS 卡片感）+ 卡片间距。</summary>
-    private static object ProviderCard(object[] items, bool first) => new Dictionary<string, object?>
+    /// <summary>
+    /// 供应商独立卡片容器（macOS 卡片感）：有图片服务时用圆角半透明背景图
+    /// （fillMode=Stretch 拉满容器，可见的模型区域划分）+ emphasis 兜底；
+    /// 无服务时仅 emphasis。
+    /// </summary>
+    private static object ProviderCard(object[] items, bool first, string? imageBaseUrl, bool dark)
     {
-        ["type"] = "Container",
-        ["style"] = "emphasis",
-        ["spacing"] = first ? "None" : "Medium",
-        ["items"] = items,
-    };
+        var card = new Dictionary<string, object?>
+        {
+            ["type"] = "Container",
+            ["style"] = "emphasis",
+            ["spacing"] = first ? "None" : "Medium",
+            ["items"] = items,
+        };
+        if (imageBaseUrl != null)
+        {
+            card["backgroundImage"] = new Dictionary<string, object?>
+            {
+                ["url"] = $"{imageBaseUrl}/cardbg?dark={(dark ? 1 : 0)}",
+                ["fillMode"] = "Stretch",
+            };
+        }
+        return card;
+    }
 
     // ---- Medium：1–2 个供应商宽松双列；3 个自动 dense 三列 ----
 
