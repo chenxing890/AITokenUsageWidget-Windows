@@ -47,7 +47,7 @@ public class WidgetCardTests
 
         Assert.Contains("5h", json);   // dense 短标题
         Assert.Contains("工具", json);
-        Assert.Contains("\"size\":\"Stretch\"", json); // §3.4：dense 也要胶囊进度条（PNG 拉伸条）
+        Assert.Contains("\"width\":\"84px\"", json); // §3.4：dense 也要胶囊进度条（PNG，显式像素宽）
         Assert.Contains("68%", json);  // Kimi 最大窗口百分比大字
         Assert.Contains("\"type\":\"Image\"", json);       // §3.4：品牌图标
         Assert.Contains("data:image/png;base64,", json);   // 图标内联 data URI
@@ -82,7 +82,7 @@ public class WidgetCardTests
         var usages = new List<ProviderUsage> { Placeholders.Kimi(), Placeholders.Glm() };
         var json = WidgetCard.Build(WidgetSize.Medium, usages, ThemePreference.System, false, Now);
 
-        Assert.Contains("\"size\":\"Stretch\"", json); // 胶囊进度条 PNG
+        Assert.Contains("\"width\":\"140px\"", json); // 胶囊进度条 PNG（显式像素宽，Stretch 会被 Board 塌缩）
         Assert.Contains("5 小时", json);
     }
 
@@ -96,7 +96,7 @@ public class WidgetCardTests
         Assert.Contains("月度工具", json);
         Assert.Contains("126/1000 次", json);
         Assert.Contains("后重置", json); // 重置倒计时
-        Assert.Contains("\"size\":\"Stretch\"", json); // 胶囊进度条 PNG
+        Assert.Contains("\"width\":\"480px\"", json); // 胶囊进度条 PNG（Large 整宽）
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public class WidgetCardTests
 
         // 缓存数据照常展示（无标题栏 / 无操作按钮，对齐 macOS）
         Assert.Contains("Kimi Code", json);
-        Assert.Contains("\"size\":\"Stretch\"", json); // 胶囊进度条 PNG
+        Assert.Contains("\"width\":\"140px\"", json); // 胶囊进度条 PNG
     }
 
     [Fact]

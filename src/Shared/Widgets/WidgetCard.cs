@@ -220,7 +220,7 @@ public static class WidgetCard
                 {
                     foreach (var window in usage.Windows)
                     {
-                        items.AddRange(WindowItems(window, textColor, now, dark));
+                        items.AddRange(WindowItems(window, textColor, now, dark, barWidth: 140)); // Medium 双列
                     }
                 }
                 break;
@@ -239,7 +239,7 @@ public static class WidgetCard
         }
         yield return Text($"{window.ShortTitle}  {Format.Percent(percent)}%",
             size: "ExtraSmall", isSubtle: true, color: textColor, wrap: false);
-        yield return BarImage(percent, dark, displayHeight: 3);
+        yield return BarImage(percent, dark, width: 84, height: 3); // dense 三列窄栏
     }
 
     // ---- Large：每个供应商一块，含进度条与重置倒计时 ----
@@ -273,7 +273,7 @@ public static class WidgetCard
                 {
                     foreach (var window in usage.Windows)
                     {
-                        items.AddRange(WindowItems(window, textColor, now, dark));
+                        items.AddRange(WindowItems(window, textColor, now, dark, barWidth: 480)); // Large 整宽
                     }
                 }
                 break;
@@ -294,7 +294,7 @@ public static class WidgetCard
     /// percent 窗口 → 标题行（窗口名左对齐 + 百分比右对齐，可附带用量文本与倒计时）+ 4px 胶囊进度条；
     /// 否则单行「标题 + 绝对值」文本。
     /// </summary>
-    private static IEnumerable<object> WindowItems(UsageWindow window, string textColor, DateTimeOffset now, bool dark)
+    private static IEnumerable<object> WindowItems(UsageWindow window, string textColor, DateTimeOffset now, bool dark, int barWidth)
     {
         if (window.UsedPercent is not { } percent)
         {
@@ -338,22 +338,25 @@ public static class WidgetCard
                 },
             },
         };
-        yield return BarImage(percent, dark, displayHeight: 4);
+        yield return BarImage(percent, dark, barWidth, height: 4);
     }
 
     /// <summary>
-    /// macOS 风格胶囊进度条：运行时生成 PNG data URI（2x 高清，SDF 抗锯齿），
-    /// Image.size=Stretch 拉满列宽。填充色按用量级别（≥80 红 / ≥50 橙 / 其余绿），
-    /// 轨道色随明暗主题（对齐 UsageCardControl.ProgressTrack / TrackBrush）。
+    /// macOS 风格胶囊进度条：运行时生成 PNG data URI（2x 高清，SDF 抗锯齿）。
+    /// 与图标一样用显式 width+height 像素声明（不加 size=Stretch——Board 的渲染器
+    /// 在布局期拿不到 data URI 图的固有尺寸，Stretch 会塌缩成 0 高不显示）。
+    /// 填充色按用量级别（≥80 红 / ≥50 橙 / 其余绿），轨道色随明暗主题
+    /// （对齐 UsageCardControl.ProgressTrack / TrackBrush）。
     /// </summary>
-    private static object BarImage(double percent, bool dark, int displayHeight) =>
+    private static object BarImage(double percent, bool dark, int width, int height) =>
         new Dictionary<string, object?>
         {
             ["type"] = "Image",
-            ["url"] = PngBar.DataUri(480, displayHeight * 2, percent,
+            ["url"] = PngBar.DataUri(width * 2, height * 2, percent,
                 LevelRgb(percent), dark ? new PngBar.Rgb(60, 60, 60) : new PngBar.Rgb(229, 229, 229)),
-            ["height"] = $"{displayHeight}px",
-            ["size"] = "Stretch",
+            ["width"] = $"{width}px",
+            ["height"] = $"{height}px",
+            ["horizontalAlignment"] = "Left",
             ["spacing"] = "Small",
         };
 
