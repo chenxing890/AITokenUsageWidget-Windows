@@ -47,10 +47,12 @@ public class WidgetCardTests
 
         Assert.Contains("5h", json);   // dense 短标题
         Assert.Contains("工具", json);
-        Assert.Contains("\"width\":\"84px\"", json); // §3.4：dense 也要胶囊进度条（PNG，显式像素宽）
+        Assert.Contains("█", json);    // §3.4：dense 也要双色块进度条
         Assert.Contains("68%", json);  // Kimi 最大窗口百分比大字
-        Assert.Contains("\"type\":\"Image\"", json);       // §3.4：品牌图标
-        Assert.Contains("data:image/png;base64,", json);   // 图标内联 data URI
+        // 品牌 emoji 图标（Board 不渲染 data: 图片）；emoji 为非 BMP 字符，
+        // System.Text.Json 会转义为代理对（🐋 = D83D DC0B），Board 端正常解码
+        Assert.Contains("\\uD83D\\uDC0B", json);
+        Assert.DoesNotContain("\"type\":\"Image\"", json); // 卡片不含任何图片元素
     }
 
     [Fact]
@@ -82,7 +84,7 @@ public class WidgetCardTests
         var usages = new List<ProviderUsage> { Placeholders.Kimi(), Placeholders.Glm() };
         var json = WidgetCard.Build(WidgetSize.Medium, usages, ThemePreference.System, false, Now);
 
-        Assert.Contains("\"width\":\"140px\"", json); // 胶囊进度条 PNG（显式像素宽，Stretch 会被 Board 塌缩）
+        Assert.Contains("█", json); // 双色块进度条
         Assert.Contains("5 小时", json);
     }
 
@@ -96,7 +98,7 @@ public class WidgetCardTests
         Assert.Contains("月度工具", json);
         Assert.Contains("126/1000 次", json);
         Assert.Contains("后重置", json); // 重置倒计时
-        Assert.Contains("\"width\":\"480px\"", json); // 胶囊进度条 PNG（Large 整宽）
+        Assert.Contains("█", json); // 双色块进度条
     }
 
     [Fact]
@@ -131,34 +133,16 @@ public class WidgetCardTests
     }
 
     [Fact]
-    public void DarkTheme_ForcesLightTextAndBackground()
+    public void AnyTheme_NoBackgroundNoForcedColor_ReliesOnHost()
     {
-        var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(),
-            ThemePreference.Dark, systemDark: false, Now);
-        var root = Parse(json);
-
-        Assert.StartsWith("data:image/png;base64,",
-            root.GetProperty("backgroundImage").GetString());
-        Assert.Contains("\"Light\"", json); // 显式浅色文字，避免白字落白底（§3.2）
-    }
-
-    [Fact]
-    public void LightTheme_ForcesDarkTextAndBackground()
-    {
-        var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(),
-            ThemePreference.Light, systemDark: true, Now);
-
-        Assert.Contains("data:image/png;base64,", json);
-        Assert.Contains("\"Dark\"", json);
-    }
-
-    [Fact]
-    public void SystemTheme_NoBackgroundReliesOnHost()
-    {
-        var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(),
-            ThemePreference.System, systemDark: true, Now);
-
-        Assert.DoesNotContain("backgroundImage", json);
+        // Board 不渲染背景图：任何主题下都不强制文字色/背景，跟随系统主题渲染
+        foreach (var theme in new[] { ThemePreference.System, ThemePreference.Light, ThemePreference.Dark })
+        {
+            var json = WidgetCard.Build(WidgetSize.Medium, Placeholders.All(), theme, false, Now);
+            Assert.DoesNotContain("backgroundImage", json);
+            Assert.DoesNotContain("\"Light\"", json);
+            Assert.DoesNotContain("\"Dark\"", json);
+        }
     }
 
     [Fact]
@@ -174,7 +158,7 @@ public class WidgetCardTests
 
         // 缓存数据照常展示（无标题栏 / 无操作按钮，对齐 macOS）
         Assert.Contains("Kimi Code", json);
-        Assert.Contains("\"width\":\"140px\"", json); // 胶囊进度条 PNG
+        Assert.Contains("█", json); // 双色块进度条
     }
 
     [Fact]
@@ -193,11 +177,22 @@ public class WidgetCardTests
     }
 
     [Fact]
-    public void LevelRgb_MatchesUsageCardControlPalette()
+    public void LevelColor_MatchesUsageCardControlLevels()
     {
-        Assert.Equal(new PngBar.Rgb(255, 69, 0), WidgetCard.LevelRgb(80));   // OrangeRed
-        Assert.Equal(new PngBar.Rgb(255, 140, 0), WidgetCard.LevelRgb(50));  // DarkOrange
-        Assert.Equal(new PngBar.Rgb(60, 179, 113), WidgetCard.LevelRgb(49)); // MediumSeaGreen
+        Assert.Equal("Attention", WidgetCard.LevelColor(80)); // 红
+        Assert.Equal("Warning", WidgetCard.LevelColor(50));   // 橙
+        Assert.Equal("Good", WidgetCard.LevelColor(49));      // 绿
+    }
+
+    [Fact]
+    public void BarBlocks_FilledPartUsesLevelColor()
+    {
+        var low = WidgetCard.Build(WidgetSize.Medium, [Placeholders.Kimi()], ThemePreference.System, false, Now);
+        Assert.Contains("\"Good\"", low); // Kimi 窗口 < 50% → 绿
+
+        var high = Placeholders.Glm();
+        var json = WidgetCard.Build(WidgetSize.Medium, [high], ThemePreference.System, false, Now);
+        Assert.Contains("\"Warning\"", json); // GLM 有 ≥50% 窗口 → 橙
     }
 
     [Fact]
