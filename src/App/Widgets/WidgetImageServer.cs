@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using AITokenUsageWidget.Shared.Models;
 
 namespace AITokenUsageWidget.App.Widgets;
@@ -7,11 +9,11 @@ namespace AITokenUsageWidget.App.Widgets;
 /// <summary>
 /// Provider 进程内嵌的本地图片服务（http://127.0.0.1）。
 /// 背景：实测 Windows Widgets Board 不渲染任何 data: URI 图片（探针卡片 + 像素扫描），
-/// 但能正常加载 http(s) 图片。因此在 Provider 进程内监听 127.0.0.1，为卡片提供：
-/// - /bar?p=0-100&amp;dark=0|1&amp;w=px&amp;h=px → 运行时生成的 macOS 风格胶囊进度条 PNG
-///   （填充色按用量级别 ≥80 红 / ≥50 橙 / 其余绿，轨道色随系统明暗，与 UsageCardControl 同色板）
-/// - /icon/{kind}?s=18|14 → 运行时矢量绘制的品牌图标 PNG（与 ProviderChip 同图形）
-/// 仅绑定 loopback，不对外暴露；URL 携带全部渲染参数，参数变则 URL 变，Board 缓存安全。
+/// 但能正常加载 http(s) 图片；且 Container 的 backgroundImage 会被拉伸成「首行高度 ×
+/// 内容宽度」的横带，无法整体铺底。因此每个供应商卡片整体渲染为一张 PNG：
+/// - /pcard?w=逻辑宽&amp;d=base64url(JSON) → macOS 风格供应商卡片 PNG
+///   （圆角浅底 + padding + 品牌图标 + 名称 + 余额/窗口行 + 胶囊进度条，2x 超采样）
+/// 仅绑定 loopback，不对外暴露；URL 携带全部渲染数据，数据变则 URL 变，Board 缓存安全。
 /// </summary>
 public static class WidgetImageServer
 {
@@ -19,7 +21,7 @@ public static class WidgetImageServer
     private const int LastPort = 49240;
 
     private static HttpListener? _listener;
-    private static readonly ConcurrentDictionary<string, byte[]> BarCache = new();
+    private static readonly ConcurrentDictionary<string, byte[]> ImageCache = new();
 
     /// <summary>服务基地址（未启动时为 null，卡片退化为纯文本渲染）。</summary>
     public static string? BaseUrl { get; private set; }
@@ -70,13 +72,7 @@ public static class WidgetImageServer
         {
             var path = context.Request.Url?.AbsolutePath ?? "";
             var query = context.Request.Url?.Query ?? "";
-            byte[]? body = path switch
-            {
-                "/bar" => RenderBar(query),
-                "/cardbg" => RenderCardBg(query),
-                "/icon/deepseek" or "/icon/kimi" or "/icon/glm" => RenderIcon(path, query),
-                _ => null,
-            };
+            byte[]? body = path == "/pcard" ? RenderProviderCard(query) : null;
             if (body == null)
             {
                 context.Response.StatusCode = 404;
@@ -95,118 +91,216 @@ public static class WidgetImageServer
     }
 
     /// <summary>
-    /// 胶囊进度条 PNG（macOS 风格，与 UsageCardControl.ProgressTrack 一致）：
-    /// System.Drawing 标准编码（Board 渲染管线对手写 PNG 编码器兼容性未知，用
-    /// 最标准的 BGRA32 PNG 排除兼容性问题）。填充色 = 用量级别色（同 LevelBrush）。
+    /// 供应商卡片整卡 PNG。载荷 d = base64url(JSON)：{k,n,d,msg,err,big,sub,max,rows[{l,r,p}]}，
+    /// 全部文本由卡片构建端预格式化（服务端不感知 L10n）。2x 超采样渲染，Board 按
+    /// Image size=stretch 等比缩放到实际列宽。w 为逻辑宽度。
     /// </summary>
-    private static byte[]? RenderBar(string query)
+    private static byte[]? RenderProviderCard(string query)
     {
-        var p = GetDouble(query, "p") ?? 0;
-        var dark = GetInt(query, "dark") == 1;
-        var w = Math.Clamp(GetInt(query, "w") ?? 140, 8, 960);
-        var h = Math.Clamp(GetInt(query, "h") ?? 4, 2, 32);
-
-        var key = $"{p:F1}|{(dark ? 1 : 0)}|{w}|{h}";
-        return BarCache.GetOrAdd(key, _ => DrawBar(w, h, Math.Clamp(p, 0, 100), dark));
+        var w = Math.Clamp(GetInt(query, "w") ?? 340, 96, 480);
+        var d = GetRaw(query, "d");
+        if (string.IsNullOrEmpty(d)) return null;
+        try
+        {
+            return ImageCache.GetOrAdd($"pcard|{w}|{d}", _ => DrawProviderCard(w, d));
+        }
+        catch (Exception)
+        {
+            return null; // 载荷损坏 → 404，卡片留白（下次刷新自愈）
+        }
     }
 
-    /// <summary>
-    /// 供应商卡片背景分段 PNG（seg=top|mid|bottom）。实测 Board 把 Container 的
-    /// backgroundImage 拉伸成「首行高度 × 内容宽度」的横带（与图片固有尺寸无关），
-    /// 因此卡片按行拆成多个容器堆叠：顶段圆角在上、底段圆角在下、中段直角。
-    /// dark=白 7% / light=黑 5%，对齐 macOS containerBackground 的浅底色卡片。
-    /// </summary>
-    private static byte[] RenderCardBg(string query)
-    {
-        var dark = GetInt(query, "dark") == 1;
-        var seg = GetRaw(query, "seg") ?? "mid";
-        var key = $"cardbg|{(dark ? 1 : 0)}|{seg}";
-        return BarCache.GetOrAdd(key, _ =>
-        {
-            const int w = 200;
-            var h = seg == "mid" ? 12 : 24;
-            const float radius = 7f;
-            using var bmp = new System.Drawing.Bitmap(w, h);
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                var color = dark
-                    ? System.Drawing.Color.FromArgb(22, 255, 255, 255)
-                    : System.Drawing.Color.FromArgb(16, 0, 0, 0);
-                using var brush = new System.Drawing.SolidBrush(color);
-                if (seg == "mid")
-                {
-                    g.FillRectangle(brush, 0, 0, w, h);
-                }
-                else
-                {
-                    using var path = RoundedRectSelective(0.5f, 0.5f, w - 1, h - 1,
-                        topRadius: seg == "top" ? radius : 0f,
-                        bottomRadius: seg == "bottom" ? radius : 0f);
-                    g.FillPath(brush, path);
-                }
-            }
-            using var ms = new System.IO.MemoryStream();
-            bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-            return ms.ToArray();
-        });
-    }
+    // 逻辑像素布局常量（绘制时 ×2 超采样）
+    private const float PadX = 12f, PadTop = 9f, PadBottom = 9f;
+    private const float IconSize = 18f, HeaderH = 20f, HeaderGap = 5f;
+    private const float BigH = 27f, SubH = 15f, MaxH = 23f;
+    private const float RowLineH = 15f, BarGap = 3f, RowGap = 6f, PlainRowGap = 4f;
 
-    /// <summary>只有上/下两个角带圆角的矩形路径（卡片顶段/底段）。</summary>
-    private static System.Drawing.Drawing2D.GraphicsPath RoundedRectSelective(
-        float x, float y, float w, float h, float topRadius, float bottomRadius)
+    private static byte[] DrawProviderCard(int width, string d)
     {
-        var path = new System.Drawing.Drawing2D.GraphicsPath();
-        var dt = topRadius * 2;
-        var db = bottomRadius * 2;
-        if (topRadius > 0)
-        {
-            path.AddArc(x, y, dt, dt, 180, 90); // 左上
-            path.AddArc(x + w - dt, y, dt, dt, 270, 90); // 右上
-        }
-        else
-        {
-            path.AddLine(x, y, x + w, y);
-        }
-        if (bottomRadius > 0)
-        {
-            path.AddArc(x + w - db, y + h - db, db, db, 0, 90); // 右下
-            path.AddArc(x, y + h - db, db, db, 90, 90); // 左下
-        }
-        else
-        {
-            path.AddLine(x + w, y + (topRadius > 0 ? topRadius : 0), x + w, y + h);
-            path.AddLine(x + w, y + h, x, y + h);
-        }
-        path.CloseFigure();
-        return path;
-    }
+        using var doc = JsonDocument.Parse(Convert.FromBase64String(Base64Pad(d)));
+        var root = doc.RootElement;
+        var dark = root.TryGetProperty("d", out var darkEl) && darkEl.GetInt32() == 1;
+        var kind = root.TryGetProperty("k", out var kEl) ? kEl.GetString() : "";
+        var name = root.TryGetProperty("n", out var nEl) ? nEl.GetString() ?? "" : "";
+        var msg = root.TryGetProperty("msg", out var mEl) ? mEl.GetString() : null;
+        var isErr = root.TryGetProperty("err", out var eEl) && eEl.GetInt32() == 1;
+        var big = root.TryGetProperty("big", out var bEl) ? bEl.GetString() : null;
+        var sub = root.TryGetProperty("sub", out var sEl) ? sEl.GetString() : null;
+        var max = root.TryGetProperty("max", out var xEl) ? xEl.GetString() : null;
+        var dense = width <= 120;
+        var barH = dense ? 3f : 4f;
+        var innerW = width - PadX * 2;
 
-    private static byte[] DrawBar(int width, int height, double percent, bool dark)
-    {
-        using var bmp = new System.Drawing.Bitmap(width, height);
+        const float s = 2f; // 超采样倍率
+        using var fName = new System.Drawing.Font("Segoe UI", 12f * s, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Pixel);
+        using var fBig = new System.Drawing.Font("Segoe UI", 20f * s, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Pixel);
+        using var fMax = new System.Drawing.Font("Segoe UI", 17f * s, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Pixel);
+        using var fLine = new System.Drawing.Font("Segoe UI", 10.5f * s, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Pixel);
+
+        // msg 可能换行：先用测量画布算高度
+        var msgH = 0f;
+        if (msg != null)
+        {
+            using var measureBmp = new System.Drawing.Bitmap(1, 1);
+            using var mg = System.Drawing.Graphics.FromImage(measureBmp);
+            var size = mg.MeasureString(msg, fLine, new System.Drawing.SizeF(innerW * s, 1000),
+                System.Drawing.StringFormat.GenericTypographic);
+            msgH = (float)Math.Ceiling(size.Height / s);
+        }
+
+        var rows = root.TryGetProperty("rows", out var rowsEl)
+            ? rowsEl.EnumerateArray().ToList()
+            : [];
+
+        // 高度预算（与绘制 pass 保持同一套增量）
+        var h = PadTop + HeaderH + HeaderGap;
+        if (msg != null) h += msgH + 4;
+        if (big != null) h += BigH;
+        if (sub != null) h += SubH;
+        if (max != null) h += MaxH;
+        foreach (var row in rows)
+        {
+            h += RowLineH + (row.TryGetProperty("p", out _) ? BarGap + barH + RowGap : PlainRowGap);
+        }
+        h += PadBottom;
+        var heightPx = (int)Math.Ceiling(h * s);
+        var widthPx = (int)Math.Ceiling(width * s);
+
+        using var bmp = new System.Drawing.Bitmap(widthPx, heightPx);
         using (var g = System.Drawing.Graphics.FromImage(bmp))
         {
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            var radius = height / 2f;
-            // 轨道（整宽胶囊）
-            using (var trackPath = Capsule(0, 0, width, height, radius))
-            using (var trackBrush = new System.Drawing.SolidBrush(TrackFor(dark)))
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+
+            var textColor = dark
+                ? System.Drawing.Color.FromArgb(245, 245, 245)
+                : System.Drawing.Color.FromArgb(28, 28, 28);
+            var subtleColor = dark
+                ? System.Drawing.Color.FromArgb(165, 255, 255, 255)
+                : System.Drawing.Color.FromArgb(160, 55, 55, 55);
+            using var textBrush = new System.Drawing.SolidBrush(textColor);
+            using var subtleBrush = new System.Drawing.SolidBrush(subtleColor);
+            using var errBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(232, 90, 90));
+
+            // 卡片底：浅底圆角矩形（对齐 macOS containerBackground）
+            using (var cardPath = RoundedRect(0.5f * s, 0.5f * s, widthPx - s, heightPx - s, 8f * s))
+            using (var cardBrush = new System.Drawing.SolidBrush(dark
+                       ? System.Drawing.Color.FromArgb(26, 255, 255, 255)
+                       : System.Drawing.Color.FromArgb(18, 0, 0, 0)))
             {
-                g.FillPath(trackBrush, trackPath);
+                g.FillPath(cardBrush, cardPath);
             }
-            // 填充（按百分比的胶囊）
-            var fillWidth = (float)Math.Round(width * percent / 100.0);
-            if (fillWidth > 0)
+
+            using var fmtNear = new System.Drawing.StringFormat(System.Drawing.StringFormat.GenericTypographic)
             {
-                using var fillPath = Capsule(0, 0, Math.Max(fillWidth, height), height, radius);
-                using var fillBrush = new System.Drawing.SolidBrush(FillFor(percent));
-                g.FillPath(fillBrush, fillPath);
+                Alignment = System.Drawing.StringAlignment.Near,
+                LineAlignment = System.Drawing.StringAlignment.Center,
+                FormatFlags = System.Drawing.StringFormatFlags.NoWrap,
+                Trimming = System.Drawing.StringTrimming.EllipsisCharacter,
+            };
+            using var fmtFar = (System.Drawing.StringFormat)fmtNear.Clone();
+            fmtFar.Alignment = System.Drawing.StringAlignment.Far;
+            using var fmtWrap = new System.Drawing.StringFormat(System.Drawing.StringFormat.GenericTypographic)
+            {
+                Alignment = System.Drawing.StringAlignment.Near,
+                LineAlignment = System.Drawing.StringAlignment.Near,
+            };
+
+            float y = PadTop;
+            // 头部：品牌图标 + 名称
+            using (var iconStream = new System.IO.MemoryStream(DrawIcon(KindOf(kind), (int)(IconSize * s))))
+            using (var iconBmp = new System.Drawing.Bitmap(iconStream))
+            {
+                g.DrawImage(iconBmp, PadX * s, (y + (HeaderH - IconSize) / 2) * s, IconSize * s, IconSize * s);
+            }
+            g.DrawString(name, fName, textBrush,
+                new System.Drawing.RectangleF((PadX + IconSize + 7) * s, y * s, (innerW - IconSize - 7) * s, HeaderH * s), fmtNear);
+            y += HeaderH + HeaderGap;
+
+            if (msg != null)
+            {
+                g.DrawString(msg, fLine, isErr ? errBrush : subtleBrush,
+                    new System.Drawing.RectangleF(PadX * s, y * s, innerW * s, msgH * s), fmtWrap);
+                y += msgH + 4;
+            }
+            if (big != null)
+            {
+                g.DrawString(big, fBig, textBrush,
+                    new System.Drawing.RectangleF(PadX * s, y * s, innerW * s, BigH * s), fmtNear);
+                y += BigH;
+            }
+            if (sub != null)
+            {
+                g.DrawString(sub, fLine, subtleBrush,
+                    new System.Drawing.RectangleF(PadX * s, y * s, innerW * s, SubH * s), fmtNear);
+                y += SubH;
+            }
+            if (max != null)
+            {
+                g.DrawString(max, fMax, textBrush,
+                    new System.Drawing.RectangleF(PadX * s, y * s, innerW * s, MaxH * s), fmtNear);
+                y += MaxH;
+            }
+
+            foreach (var row in rows)
+            {
+                var left = row.TryGetProperty("l", out var lEl) ? lEl.GetString() ?? "" : "";
+                var lineRect = new System.Drawing.RectangleF(PadX * s, y * s, innerW * s, RowLineH * s);
+                g.DrawString(left, fLine, subtleBrush, lineRect, fmtNear);
+                if (row.TryGetProperty("r", out var rEl) && rEl.GetString() is { } right)
+                {
+                    g.DrawString(right, fLine, textBrush, lineRect, fmtFar);
+                }
+                y += RowLineH;
+                if (row.TryGetProperty("p", out var pEl))
+                {
+                    var percent = Math.Clamp(pEl.GetDouble(), 0, 100);
+                    y += BarGap;
+                    using (var trackPath = Capsule(PadX * s, y * s, innerW * s, barH * s, barH * s / 2))
+                    using (var trackBrush = new System.Drawing.SolidBrush(dark
+                               ? System.Drawing.Color.FromArgb(30, 255, 255, 255)
+                               : System.Drawing.Color.FromArgb(22, 0, 0, 0)))
+                    {
+                        g.FillPath(trackBrush, trackPath);
+                    }
+                    var fillW = (float)(innerW * s * percent / 100.0);
+                    if (fillW > 0)
+                    {
+                        using var fillPath = Capsule(PadX * s, y * s, Math.Max(fillW, barH * s), barH * s, barH * s / 2);
+                        using var fillBrush = new System.Drawing.SolidBrush(FillFor(percent));
+                        g.FillPath(fillBrush, fillPath);
+                    }
+                    y += barH + RowGap;
+                }
+                else
+                {
+                    y += PlainRowGap;
+                }
             }
         }
         using var ms = new System.IO.MemoryStream();
         bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
         return ms.ToArray();
+    }
+
+    private static ProviderKind KindOf(string? k) => k switch
+    {
+        "deepseek" => ProviderKind.DeepSeek,
+        "kimi" => ProviderKind.Kimi,
+        _ => ProviderKind.Glm,
+    };
+
+    private static string Base64Pad(string d)
+    {
+        var b64 = d.Replace('-', '+').Replace('_', '/');
+        return (b64.Length % 4) switch
+        {
+            2 => b64 + "==",
+            3 => b64 + "=",
+            _ => b64,
+        };
     }
 
     private static System.Drawing.Drawing2D.GraphicsPath Capsule(float x, float y, float w, float h, float r)
@@ -221,22 +315,9 @@ public static class WidgetImageServer
 
     /// <summary>
     /// 品牌图标 PNG：与主 App ProviderChip 同一套图形（品牌色对角渐变圆角方块 +
-    /// 白色字形：DeepSeek 水滴 / Kimi 月亮 / GLM 星芒）。按请求尺寸直接矢量绘制——
-    /// 从 96px 原图重采样会糊边丢细节，直接画最锐利；固有尺寸 == 声明尺寸，杜绝裁剪。
+    /// 白色字形：DeepSeek 水滴 / Kimi 月亮 / GLM 星芒）。按目标尺寸直接矢量绘制——
+    /// 从 96px 原图重采样会糊边丢细节，直接画最锐利。
     /// </summary>
-    private static byte[] RenderIcon(string path, string query)
-    {
-        var size = GetInt(query, "s") == 14 ? 14 : 18;
-        var kind = path switch
-        {
-            "/icon/deepseek" => ProviderKind.DeepSeek,
-            "/icon/kimi" => ProviderKind.Kimi,
-            _ => ProviderKind.Glm,
-        };
-        var key = $"icon|{kind}|{size}";
-        return BarCache.GetOrAdd(key, _ => DrawIcon(kind, size));
-    }
-
     private static byte[] DrawIcon(ProviderKind kind, int size)
     {
         var hex = kind.BrandHex();
@@ -346,16 +427,6 @@ public static class WidgetImageServer
         >= 50 => System.Drawing.Color.FromArgb(255, 140, 0),  // DarkOrange
         _ => System.Drawing.Color.FromArgb(60, 179, 113),     // MediumSeaGreen
     };
-
-    private static System.Drawing.Color TrackFor(bool dark) =>
-        dark ? System.Drawing.Color.FromArgb(60, 60, 60) : System.Drawing.Color.FromArgb(229, 229, 229);
-
-    private static double? GetDouble(string query, string name)
-    {
-        var value = GetRaw(query, name);
-        return double.TryParse(value, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
-    }
 
     private static int? GetInt(string query, string name) =>
         int.TryParse(GetRaw(query, name), out var i) ? i : null;

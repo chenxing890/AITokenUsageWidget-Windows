@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AITokenUsageWidget.Shared.Models;
@@ -16,9 +17,11 @@ public enum WidgetSize
 /// 输出完整字面卡片 JSON（Template 与 Data 由本方法合成，Data 固定为 "{}"）。
 ///
 /// 平台约束（实测 Windows Widgets Board，2026-08）：Board 渲染器不加载任何
-/// data: URI 图片，但能加载 http(s) 图片。因此图片（胶囊进度条 / 品牌图标）由
-/// Provider 进程内嵌的 127.0.0.1 图片服务提供（imageBaseUrl 参数）；服务不可用
-/// 时退化为纯文本渲染（emoji 图标 + 双色「█」块进度条）。
+/// data: URI 图片，但能加载 http(s) 图片；且 Container 的 backgroundImage 会被
+/// 拉伸成「首行高度 × 内容宽度」的横带，无法整体铺底。因此每个供应商卡片整体
+/// 渲染为一张 PNG（圆角 / padding / 图标 / 进度条全在图内，URL 携带全部渲染
+/// 数据的 base64url 载荷，数据变则 URL 变，Board 缓存安全），卡片里只放一个
+/// Image 元素；服务不可用时退化为纯文本渲染（emoji 图标 + 双色「█」块进度条）。
 /// 文字颜色始终 Default，由 Board 按系统主题渲染（强制 Light/Dark 文字在
 /// 背景不可控时会对比度失控）。
 /// </summary>
@@ -49,10 +52,12 @@ public static class WidgetCard
         else if (size == WidgetSize.Medium)
         {
             var dense = usages.Count >= 3; // 3 个供应商自动切换紧凑三列（FR-2）
-            // macOS 视觉：每个供应商一张独立小卡片（逐行背景堆叠）
+            var cardWidth = usages.Count >= 3 ? 108 : usages.Count == 2 ? 166 : 340; // 逻辑宽（2x 渲染）
+            // macOS 视觉：每个供应商一张独立小卡片
             var columns = usages.Take(3).Select(usage => Col("stretch",
-                ProviderCardRows(DenseOrCompactItems(usage, dense, textColor, now, imageBaseUrl, systemDark),
-                    first: true, imageBaseUrl, systemDark))).ToArray();
+                imageBaseUrl != null
+                    ? [ProviderCardImage(usage, dense, now, imageBaseUrl, systemDark, cardWidth, "None")]
+                    : [FallbackCard(DenseOrCompactItems(usage, dense, textColor, now), "None")])).ToArray();
             body.Add(new Dictionary<string, object?>
             {
                 ["type"] = "ColumnSet",
@@ -64,10 +69,11 @@ public static class WidgetCard
         {
             foreach (var (usage, index) in usages.Take(4).Select((u, i) => (u, i)))
             {
-                // macOS 视觉：每个供应商一张独立卡片（逐行背景堆叠成卡）
-                body.AddRange(ProviderCardRows(
-                    LargeProviderItems(usage, textColor, now, imageBaseUrl, systemDark),
-                    first: index == 0, imageBaseUrl, systemDark));
+                // macOS 视觉：每个供应商一张独立卡片（整卡渲染为一张 PNG）
+                var spacing = index == 0 ? "None" : "Medium";
+                body.Add(imageBaseUrl != null
+                    ? ProviderCardImage(usage, dense: false, now, imageBaseUrl, systemDark, 340, spacing)
+                    : FallbackCard(LargeProviderItems(usage, textColor, now), spacing));
             }
         }
 
@@ -114,110 +120,131 @@ public static class WidgetCard
     public static string EmptyData => "{}";
 
     /// <summary>
-    /// 供应商独立卡片（macOS 卡片感）。实测 Board 渲染器把 Container 的
-    /// backgroundImage 拉伸成「首行高度 × 内容宽度」的横带（与图片固有尺寸无关），
-    /// 无法整体铺底——因此每个内容行一个独立容器（各自带背景横带），行间
-    /// spacing=None 无缝堆叠成完整卡片；首行/末行各垫一个空行（圆角顶/底段）
-    /// 作为卡片上下边距。无图片服务时退化为单个 emphasis 容器。
+    /// 供应商独立卡片（macOS 卡片感）：整卡渲染为一张 PNG（圆角 / padding / 品牌图标 /
+    /// 胶囊进度条全在图内），卡片里只放一个 size=stretch 的 Image 元素。渲染数据以
+    /// base64url JSON 载荷放在 URL 里——Board 按 URL 强缓存图片，数据变则 URL 变，
+    /// 缓存自动失效。w 为逻辑宽度（服务端 2x 渲染，Board 等比缩放到实际列宽）。
     /// </summary>
-    private static object[] ProviderCardRows(object[] items, bool first, string? imageBaseUrl,
-        bool dark)
+    private static object ProviderCardImage(ProviderUsage usage, bool dense, DateTimeOffset now,
+        string imageBaseUrl, bool dark, int width, string spacing)
     {
-        if (imageBaseUrl == null)
+        var payload = new Dictionary<string, object?>
         {
-            return
-            [
-                new Dictionary<string, object?>
+            ["k"] = IconName(usage.Kind),
+            ["n"] = usage.DisplayName,
+            ["d"] = dark ? 1 : 0,
+        };
+        switch (usage.State)
+        {
+            case UsageState.MissingKey:
+                payload["msg"] = L10n.Get("missingKey");
+                payload["err"] = 0;
+                break;
+            case UsageState.Error:
+                payload["msg"] = usage.ErrorMessage ?? "请求失败";
+                payload["err"] = 1;
+                break;
+            default:
+                if (usage.Kind.ShowsBalance())
                 {
-                    ["type"] = "Container",
-                    ["style"] = "emphasis",
-                    ["spacing"] = first ? "None" : "Medium",
-                    ["items"] = items,
-                },
-            ];
+                    payload["big"] = usage.TotalBalance is { } total
+                        ? $"{usage.CurrencySymbol} {Format.Amount(total)}"
+                        : "--";
+                    if (usage.GrantedBalance is { } granted && usage.ToppedUpBalance is { } toppedUp)
+                    {
+                        payload["sub"] = L10n.Get("grantedToppedUp",
+                            $"{usage.CurrencySymbol}{Format.Amount(granted)}",
+                            $"{usage.CurrencySymbol}{Format.Amount(toppedUp)}");
+                    }
+                }
+                else
+                {
+                    var windows = usage.Windows.Take(dense ? 3 : 4).ToList();
+                    if (dense)
+                    {
+                        var max = windows.Where(w => w.UsedPercent.HasValue)
+                            .Select(w => w.UsedPercent!.Value).DefaultIfEmpty(-1).Max();
+                        if (max >= 0) payload["max"] = $"{Format.Percent(max)}%";
+                    }
+                    var rows = new List<object>();
+                    foreach (var window in windows)
+                    {
+                        if (window.UsedPercent is { } percent)
+                        {
+                            var row = new Dictionary<string, object?>
+                            {
+                                ["l"] = dense
+                                    ? $"{window.ShortTitle}  {Format.Percent(percent)}%"
+                                    : window.Title,
+                                ["p"] = Math.Round(Math.Clamp(percent, 0, 100), 1),
+                            };
+                            if (!dense)
+                            {
+                                // 右侧：用量 + 百分比 + 重置倒计时（对齐 macOS 卡片）
+                                var tail = string.IsNullOrEmpty(window.UsedText)
+                                    ? $"{Format.Percent(percent)}%"
+                                    : $"{window.UsedText}   {Format.Percent(percent)}%";
+                                var countdown = Format.ResetCountdown(window.ResetTime, now);
+                                if (countdown.Length > 0) tail += $"   · {countdown}";
+                                row["r"] = tail;
+                            }
+                            rows.Add(row);
+                        }
+                        else
+                        {
+                            // 无百分比窗口（如「30 天累计」）：单行文本，不画进度条
+                            rows.Add(new Dictionary<string, object?>
+                            {
+                                ["l"] = dense
+                                    ? $"{window.ShortTitle}  {window.UsedText ?? "--"}"
+                                    : $"{window.Title}   {window.UsedText ?? "--"}",
+                            });
+                        }
+                    }
+                    payload["rows"] = rows;
+                }
+                break;
         }
 
-        var rows = new List<object>
+        var payloadJson = JsonSerializer.Serialize(payload, PayloadJsonOptions);
+        var d = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson))
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        return new Dictionary<string, object?>
         {
-            CardRow("top", Text(" ", size: "ExtraSmall"), first ? "None" : "Medium",
-                imageBaseUrl, dark),
+            ["type"] = "Image",
+            ["url"] = $"{imageBaseUrl}/pcard?w={width}&d={d}",
+            ["size"] = "stretch",
+            ["altText"] = usage.DisplayName,
+            ["horizontalAlignment"] = "Center",
+            ["spacing"] = spacing,
         };
-        foreach (var item in items)
-        {
-            rows.Add(CardRow("mid", item, "None", imageBaseUrl, dark));
-        }
-        rows.Add(CardRow("bottom", Text(" ", size: "ExtraSmall"), "None", imageBaseUrl, dark));
-        return rows.ToArray();
     }
 
-    /// <summary>卡片的一行：独立容器 + 对应分段（顶/中/底）背景横带。</summary>
-    private static object CardRow(string seg, object content, string spacing,
-        string imageBaseUrl, bool dark) =>
+    private static readonly JsonSerializerOptions PayloadJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>无图片服务时的文本兜底卡片：单个 emphasis 容器。</summary>
+    private static object FallbackCard(object[] items, string spacing) =>
         new Dictionary<string, object?>
         {
             ["type"] = "Container",
+            ["style"] = "emphasis",
             ["spacing"] = spacing,
-            ["backgroundImage"] = new Dictionary<string, object?>
-            {
-                ["url"] = $"{imageBaseUrl}/cardbg?dark={(dark ? 1 : 0)}&seg={seg}&v=4",
-                ["fillMode"] = "Stretch",
-            },
-            ["items"] = new[] { content },
+            ["items"] = items,
         };
 
     // ---- Medium：1–2 个供应商宽松双列；3 个自动 dense 三列 ----
 
-    /// <summary>
-    /// 图标 + 名称标题行（对齐 macOS 卡片头部）。有图片服务时用真实品牌图标
-    /// （固有尺寸 == 声明尺寸，杜绝裁剪）；无服务时退化为 emoji 文本。
-    /// </summary>
+    /// <summary>图标 + 名称标题行（对齐 macOS 卡片头部），文本兜底用品牌 emoji。</summary>
     private static object ProviderHeader(ProviderUsage usage, bool dense, string textColor,
-        bool large = false, string? imageBaseUrl = null)
+        bool large = false)
     {
         var nameSize = dense ? "ExtraSmall" : large ? "Medium" : "Small";
-        if (imageBaseUrl == null)
-        {
-            return Text($"{EmojiFor(usage.Kind)} {usage.DisplayName}",
-                size: nameSize, weight: "Bolder", color: textColor, wrap: false);
-        }
-
-        var iconSize = dense ? 14 : 18;
-        return new Dictionary<string, object?>
-        {
-            ["type"] = "ColumnSet",
-            ["spacing"] = "None",
-            ["columns"] = new object[]
-            {
-                new Dictionary<string, object?>
-                {
-                    ["type"] = "Column",
-                    ["width"] = "auto",
-                    ["verticalContentAlignment"] = "Center",
-                    ["items"] = new object[]
-                    {
-                        new Dictionary<string, object?>
-                        {
-                            ["type"] = "Image",
-                            ["url"] = $"{imageBaseUrl}/icon/{IconName(usage.Kind)}?s={iconSize}&v=2",
-                            ["width"] = $"{iconSize}px",
-                            ["height"] = $"{iconSize}px",
-                        },
-                    },
-                },
-                new Dictionary<string, object?>
-                {
-                    ["type"] = "Column",
-                    ["width"] = "stretch",
-                    ["spacing"] = "Small",
-                    ["verticalContentAlignment"] = "Center",
-                    ["items"] = new object[]
-                    {
-                        Text(usage.DisplayName, size: nameSize,
-                            weight: "Default", color: textColor, wrap: false),
-                    },
-                },
-            },
-        };
+        return Text($"{EmojiFor(usage.Kind)} {usage.DisplayName}",
+            size: nameSize, weight: "Bolder", color: textColor, wrap: false);
     }
 
     private static string IconName(ProviderKind kind) => kind switch
@@ -235,11 +262,11 @@ public static class WidgetCard
         _ => "🤖",
     };
 
-    private static object[] DenseOrCompactItems(ProviderUsage usage, bool dense, string textColor, DateTimeOffset now, string? imageBaseUrl, bool dark)
+    private static object[] DenseOrCompactItems(ProviderUsage usage, bool dense, string textColor, DateTimeOffset now)
     {
         var items = new List<object>
         {
-            ProviderHeader(usage, dense, textColor, imageBaseUrl: imageBaseUrl),
+            ProviderHeader(usage, dense, textColor),
         };
 
         switch (usage.State)
@@ -275,14 +302,14 @@ public static class WidgetCard
                     }
                     foreach (var window in windows)
                     {
-                        items.AddRange(DenseWindowItems(window, textColor, imageBaseUrl, dark));
+                        items.AddRange(DenseWindowItems(window, textColor));
                     }
                 }
                 else
                 {
                     foreach (var window in usage.Windows)
                     {
-                        items.AddRange(WindowItems(window, textColor, now, barWidth: 140, imageBaseUrl, dark)); // Medium 双列
+                        items.AddRange(WindowItems(window, textColor, now, segments: 12)); // Medium 双列
                     }
                 }
                 break;
@@ -290,8 +317,8 @@ public static class WidgetCard
         return items.ToArray();
     }
 
-    /// <summary>dense 窗口行：短标题 + 百分比 + 胶囊进度条（无服务时双色块）；无百分比窗口退化为单行文本。</summary>
-    private static IEnumerable<object> DenseWindowItems(UsageWindow window, string textColor, string? imageBaseUrl, bool dark)
+    /// <summary>dense 窗口行：短标题 + 百分比 + 双色块进度条；无百分比窗口退化为单行文本。</summary>
+    private static IEnumerable<object> DenseWindowItems(UsageWindow window, string textColor)
     {
         if (window.UsedPercent is not { } percent)
         {
@@ -301,16 +328,16 @@ public static class WidgetCard
         }
         yield return Text($"{window.ShortTitle}  {Format.Percent(percent)}%",
             size: "ExtraSmall", isSubtle: true, color: textColor, wrap: false);
-        yield return ProgressBar(percent, width: 84, height: 3, segments: 8, imageBaseUrl, dark); // dense 三列窄栏
+        yield return BarBlocks(percent, segments: 8); // dense 三列窄栏
     }
 
     // ---- Large：每个供应商一块，含进度条与重置倒计时 ----
 
-    private static object[] LargeProviderItems(ProviderUsage usage, string textColor, DateTimeOffset now, string? imageBaseUrl, bool dark)
+    private static object[] LargeProviderItems(ProviderUsage usage, string textColor, DateTimeOffset now)
     {
         var items = new List<object>
         {
-            ProviderHeader(usage, dense: false, textColor, large: true, imageBaseUrl: imageBaseUrl),
+            ProviderHeader(usage, dense: false, textColor, large: true),
         };
 
         switch (usage.State)
@@ -335,7 +362,7 @@ public static class WidgetCard
                 {
                     foreach (var window in usage.Windows)
                     {
-                        items.AddRange(WindowItems(window, textColor, now, barWidth: 480, imageBaseUrl, dark)); // Large 整宽
+                        items.AddRange(WindowItems(window, textColor, now, segments: 24)); // Large 整宽
                     }
                 }
                 break;
@@ -356,7 +383,7 @@ public static class WidgetCard
     /// percent 窗口 → 标题行（窗口名左对齐 + 百分比右对齐，可附带用量文本与倒计时）+ 双色块进度条；
     /// 否则单行「标题 + 绝对值」文本。
     /// </summary>
-    private static IEnumerable<object> WindowItems(UsageWindow window, string textColor, DateTimeOffset now, int barWidth, string? imageBaseUrl, bool dark)
+    private static IEnumerable<object> WindowItems(UsageWindow window, string textColor, DateTimeOffset now, int segments)
     {
         if (window.UsedPercent is not { } percent)
         {
@@ -400,38 +427,13 @@ public static class WidgetCard
                 },
             },
         };
-        yield return ProgressBar(percent, barWidth, height: 4, segments: 24, imageBaseUrl, dark);
+        yield return BarBlocks(percent, segments);
     }
 
     /// <summary>
-    /// 进度条：有图片服务时用 macOS 风格胶囊条 PNG（127.0.0.1 本地服务，固有尺寸 ==
-    /// 声明尺寸，与 UsageCardControl.ProgressTrack 同 4px 圆角轨道 + 级别色填充）；
-    /// 服务不可用时退化为双色「█」块。
-    /// </summary>
-    private static object ProgressBar(double percent, int width, int height, int segments,
-        string? imageBaseUrl, bool dark)
-    {
-        if (imageBaseUrl != null)
-        {
-            var p = Math.Round(Math.Clamp(percent, 0, 100), 1)
-                .ToString(System.Globalization.CultureInfo.InvariantCulture);
-            return new Dictionary<string, object?>
-            {
-                ["type"] = "Image",
-                ["url"] = $"{imageBaseUrl}/bar?p={p}&dark={(dark ? 1 : 0)}&w={width}&h={height}",
-                ["width"] = $"{width}px",
-                ["height"] = $"{height}px",
-                ["horizontalAlignment"] = "Left",
-                ["spacing"] = "Small",
-            };
-        }
-        return BarBlocks(percent, segments);
-    }
-
-    /// <summary>
-    /// 双色块进度条：填充段「█」按用量级别着色（Good/Warning/Attention），
-    /// 轨道段「█」isSubtle 灰，两段紧挨成连续条（Board 不渲染图片，文本块是唯一
-    /// 可靠的着色手段；Segoe 全角块字符横向无缝拼接）。
+    /// 双色块进度条（无图片服务时的文本兜底）：填充段「█」按用量级别着色
+    /// （Good/Warning/Attention），轨道段「█」isSubtle 灰，两段紧挨成连续条
+    /// （Segoe 全角块字符横向无缝拼接）。
     /// </summary>
     private static object BarBlocks(double percent, int segments)
     {

@@ -179,24 +179,35 @@ public class WidgetCardTests
     }
 
     [Fact]
-    public void WithImageServer_BarsAndIconsUseLocalHttpImages()
+    public void WithImageServer_ProviderCardsRenderAsSingleImage()
     {
         const string server = "http://127.0.0.1:49231";
         var json = WidgetCard.Build(WidgetSize.Large, Placeholders.All(),
             ThemePreference.System, systemDark: true, Now, server);
 
-        // 进度条：胶囊条 PNG 由本地服务提供，固有尺寸 == 声明尺寸（Large 480x4）
-        Assert.Contains($"\"url\":\"{server}/bar?", json);
-        Assert.Contains("\"width\":\"480px\"", json);
-        Assert.Contains("\"height\":\"4px\"", json);
-        Assert.Contains("dark=1", json); // 系统深色 → 深轨道
-        // 品牌图标：18px 固有尺寸（v=2 防 Board 图片缓存）
-        Assert.Contains($"\"url\":\"{server}/icon/kimi?s=18&v=2\"", json);
-        Assert.Contains($"\"url\":\"{server}/icon/deepseek?s=18&v=2\"", json);
-        // macOS：供应商卡片背景图（逐行分段堆叠）
-        Assert.Contains($"\"url\":\"{server}/cardbg?dark=1&seg=", json);
-        Assert.Contains("\"fillMode\":\"Stretch\"", json);
-        Assert.DoesNotContain("█", json); // 不再使用文本块兜底
+        // 每个供应商整卡渲染为一张 PNG（圆角/padding/图标/进度条全在图内）
+        var container = Parse(json).GetProperty("body").EnumerateArray().Single();
+        var images = container.GetProperty("items").EnumerateArray()
+            .Where(e => e.GetProperty("type").GetString() == "Image").ToList();
+        Assert.Equal(3, images.Count); // DeepSeek / Kimi / GLM 各一张
+        foreach (var image in images)
+        {
+            Assert.StartsWith($"{server}/pcard?w=340&d=", image.GetProperty("url").GetString());
+            Assert.Equal("stretch", image.GetProperty("size").GetString());
+        }
+        Assert.DoesNotContain("backgroundImage", json); // 不再用分段背景堆叠
+        Assert.DoesNotContain("█", json);               // 不再使用文本块兜底
+
+        // 载荷 = base64url(JSON)，携带全部渲染数据（Board 按 URL 缓存，数据变则 URL 变）
+        var url = images[0].GetProperty("url").GetString()!;
+        var d = url.Split("&d=")[1];
+        var b64 = d.Replace('-', '+').Replace('_', '/');
+        b64 += b64.Length % 4 == 2 ? "==" : b64.Length % 4 == 3 ? "=" : "";
+        var payload = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64));
+        Assert.Contains("\"k\":\"deepseek\"", payload);
+        Assert.Contains("\"d\":1", payload);      // 系统深色
+        Assert.Contains("¥ 88.50", payload);      // 余额大字
+        Assert.Contains("赠送 ¥10.00 · 充值 ¥78.50", payload);
     }
 
     [Fact]
@@ -205,7 +216,7 @@ public class WidgetCardTests
         var json = WidgetCard.Build(WidgetSize.Large, Placeholders.All(),
             ThemePreference.System, systemDark: true, Now, imageBaseUrl: null);
         Assert.Contains("█", json);
-        Assert.DoesNotContain("/bar?", json);
+        Assert.DoesNotContain("/pcard?", json);
     }
 
     [Fact]
