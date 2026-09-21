@@ -273,9 +273,9 @@ public static class WidgetImageServer
                         g.FillPath(fillBrush, fillPath);
                     }
                     // 7 天窗口健康配额线（对齐 macOS）：半透明灰刻度线，与进度条同高内嵌
-                    if (row.TryGetProperty("m", out var mEl))
+                    if (row.TryGetProperty("m", out var markerEl))
                     {
-                        var marker = Math.Clamp(mEl.GetDouble(), 0, 100);
+                        var marker = Math.Clamp(markerEl.GetDouble(), 0, 100);
                         var mx = PadX * s + (float)(innerW * s * marker / 100.0);
                         using var markerBrush = new System.Drawing.SolidBrush(
                             System.Drawing.Color.FromArgb(191, 128, 128, 128)); // Gray ~75%
