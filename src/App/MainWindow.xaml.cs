@@ -25,6 +25,7 @@ public sealed partial class MainWindow : Window
 
     private bool _loading;
     private ProviderKind? _currentPageKind; // 当前详情页供应商，避免重复导航
+    private bool _onDashboard; // 当前是否停留在仪表盘页
 
     /// <summary>侧栏供应商行视图模型。</summary>
     private sealed class ProviderRow
@@ -66,6 +67,9 @@ public sealed partial class MainWindow : Window
         ThresholdBox.IsEnabled = AlertsToggle.IsOn;
         _loading = false;
 
+        // 概览（仪表盘）行：单一数据项，选中即导航
+        DashboardList.ItemsSource = new[] { new object() };
+
         LoadSidebar(App.PendingProviderNavigation ?? ProviderKind.DeepSeek);
         if (App.PendingProviderNavigation != null)
         {
@@ -85,12 +89,47 @@ public sealed partial class MainWindow : Window
 
     private void OnSettingsChanged()
     {
+        if (_onDashboard)
+        {
+            LoadSidebarDashboard();
+            return;
+        }
         var current = (ProviderList.SelectedItem as ProviderRow)?.Kind ?? ProviderKind.DeepSeek;
         LoadSidebar(current);
     }
 
+    /// <summary>是否有已启用供应商（仪表盘仅在此条件下显示）。</summary>
+    private static bool AnyEnabled() =>
+        ProviderKindExtensions.All.Any(k => AppSettings.Config(k).IsEnabled);
+
     /// <summary>重建侧栏供应商行与底部「n/3 已启用」，并保持选中项。</summary>
     private void LoadSidebar(ProviderKind select)
+    {
+        _onDashboard = false;
+        var rows = ProviderKindExtensions.All.Select(kind =>
+        {
+            var enabled = AppSettings.Config(kind).IsEnabled;
+            return new ProviderRow
+            {
+                Kind = kind,
+                Name = kind.DisplayName(),
+                Subtitle = enabled ? kind.Subtitle() : "未启用",
+                SubtitleBrush = SidebarTextBrush(tertiary: !enabled),
+                DotVisibility = enabled ? Visibility.Visible : Visibility.Collapsed,
+            };
+        }).ToList();
+
+        ProviderList.ItemsSource = rows;
+        UpdateDashboardVisibility();
+        DashboardList.SelectedIndex = -1;
+        ProviderList.SelectedItem = rows.FirstOrDefault(r => r.Kind == select) ?? rows[0];
+
+        var enabledCount = rows.Count(r => r.DotVisibility == Visibility.Visible);
+        EnabledSummary.Text = $"{enabledCount}/{rows.Count} 已启用";
+    }
+
+    /// <summary>重建侧栏并选中仪表盘（有启用才显示；否则回落到第一个供应商）。</summary>
+    private void LoadSidebarDashboard()
     {
         var rows = ProviderKindExtensions.All.Select(kind =>
         {
@@ -106,11 +145,28 @@ public sealed partial class MainWindow : Window
         }).ToList();
 
         ProviderList.ItemsSource = rows;
-        ProviderList.SelectedItem = rows.FirstOrDefault(r => r.Kind == select) ?? rows[0];
-
         var enabledCount = rows.Count(r => r.DotVisibility == Visibility.Visible);
         EnabledSummary.Text = $"{enabledCount}/{rows.Count} 已启用";
+
+        if (!AnyEnabled())
+        {
+            // 全部关闭：隐藏仪表盘并回落到第一个供应商页
+            _onDashboard = false;
+            UpdateDashboardVisibility();
+            DashboardList.SelectedIndex = -1;
+            ProviderList.SelectedItem = rows[0];
+            return;
+        }
+
+        _onDashboard = true;
+        UpdateDashboardVisibility();
+        ProviderList.SelectedIndex = -1;
+        DashboardList.SelectedIndex = 0;
     }
+
+    /// <summary>仪表盘行只在至少一个供应商启用时显示。</summary>
+    private void UpdateDashboardVisibility() =>
+        DashboardList.Visibility = AnyEnabled() ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>
     /// 侧栏副标题画刷：Application.Resources 只会解析启动时主题（快照），
@@ -132,10 +188,23 @@ public sealed partial class MainWindow : Window
             // 编辑配置会触发 AppSettings.Changed → 侧栏重建 → 选中项被重设；
             // 若不加守卫，每敲一个字符都会重新导航、销毁正在输入的页面
             //（焦点丢失、按键落入虚空、预览反复重置为「正在连接」）。
-            if (_currentPageKind == row.Kind) return;
+            if (!_onDashboard && _currentPageKind == row.Kind) return;
+            _onDashboard = false;
             _currentPageKind = row.Kind;
+            DashboardList.SelectedIndex = -1; // 切到供应商：取消概览选中
             ContentFrame.Navigate(typeof(ProviderPage), row.Kind);
         }
+    }
+
+    private void OnDashboardSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (DashboardList.SelectedIndex < 0) return;
+        if (!AnyEnabled()) return; // 无启用供应商时不进入
+        if (_onDashboard) return; // 已在仪表盘，避免重复导航
+        _onDashboard = true;
+        _currentPageKind = null;
+        ProviderList.SelectedIndex = -1; // 切到概览：取消供应商选中
+        ContentFrame.Navigate(typeof(DashboardPage));
     }
 
     // ---- 外观（对齐 macOS sidebar「外观」分区） ----

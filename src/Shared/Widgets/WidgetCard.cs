@@ -178,6 +178,9 @@ public static class WidgetCard
                                     : window.Title,
                                 ["p"] = Math.Round(Math.Clamp(percent, 0, 100), 1),
                             };
+                            // 7 天窗口健康配额线（对齐 macOS）：进度条上的灰色刻度线位置
+                            if (window.IsWeekly && window.HealthyQuotaPercent(now) is { } marker && marker > 0 && marker < 100)
+                                row["m"] = Math.Round(marker, 1);
                             if (!dense)
                             {
                                 // 右侧：用量 + 百分比 + 重置倒计时（对齐 macOS 卡片）
@@ -328,7 +331,7 @@ public static class WidgetCard
         }
         yield return Text($"{window.ShortTitle}  {Format.Percent(percent)}%",
             size: "ExtraSmall", isSubtle: true, color: textColor, wrap: false);
-        yield return BarBlocks(percent, segments: 8); // dense 三列窄栏
+        yield return BarBlocks(percent, segments: 8, window.HealthyQuotaPercent(DateTimeOffset.UtcNow)); // dense 三列窄栏
     }
 
     // ---- Large：每个供应商一块，含进度条与重置倒计时 ----
@@ -427,29 +430,55 @@ public static class WidgetCard
                 },
             },
         };
-        yield return BarBlocks(percent, segments);
+        yield return BarBlocks(percent, segments, window.IsWeekly ? window.HealthyQuotaPercent(now) : null);
     }
 
     /// <summary>
     /// 双色块进度条（无图片服务时的文本兜底）：填充段「█」按用量级别着色
     /// （Good/Warning/Attention），轨道段「█」isSubtle 灰，两段紧挨成连续条
-    /// （Segoe 全角块字符横向无缝拼接）。
+    /// （Segoe 全角块字符横向无缝拼接）。markerPercent 为 7 天窗口健康配额线
+    /// 位置（0–100）：把该段块字符替换为「▎」灰色刻度线（对齐 macOS 健康线）。
     /// </summary>
-    private static object BarBlocks(double percent, int segments)
+    private static object BarBlocks(double percent, int segments, double? markerPercent = null)
     {
         var clamped = Math.Clamp(percent, 0, 100);
         var filled = (int)Math.Round(clamped / 100 * segments, MidpointRounding.AwayFromZero);
+
+        // 健康配额线：把对应段替换为刻度字符（在填充/轨道拼接处整体替换该段）
+        int? markerSeg = null;
+        if (markerPercent is { } m && m > 0 && m < 100)
+        {
+            var idx = (int)Math.Round(m / 100 * segments, MidpointRounding.AwayFromZero);
+            markerSeg = Math.Clamp(idx, 0, segments); // 落在 0..segments，等于 filled 时叠在边界
+        }
+
+        string FillBlocks(int count)
+        {
+            if (markerSeg is not { } ms) return new string('█', count);
+            var chars = Enumerable.Repeat('█', count).ToArray();
+            // 刻度线落在填充段内：替换该位置块
+            if (ms >= 0 && ms < count) chars[ms] = '▎';
+            return new string(chars);
+        }
 
         var columns = new List<object>();
         if (filled > 0)
         {
             columns.Add(Col("auto",
-                [Text(new string('█', filled), size: "ExtraSmall", color: LevelColor(clamped))]));
+                [Text(FillBlocks(filled), size: "ExtraSmall", color: LevelColor(clamped))]));
         }
         if (filled < segments)
         {
+            var trackCount = segments - filled;
+            string track = new string('█', trackCount);
+            if (markerSeg is { } ms && ms >= filled && ms < segments)
+            {
+                var chars = track.ToCharArray();
+                chars[ms - filled] = '▎';
+                track = new string(chars);
+            }
             columns.Add(Col("auto",
-                [Text(new string('█', segments - filled), size: "ExtraSmall", isSubtle: true)]));
+                [Text(track, size: "ExtraSmall", isSubtle: true)]));
         }
         return new Dictionary<string, object?>
         {

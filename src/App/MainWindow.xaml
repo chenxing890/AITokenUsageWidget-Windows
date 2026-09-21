@@ -38,8 +38,37 @@
 
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Padding="12,8" Spacing="2">
-                        <TextBlock Text="供应商" Style="{StaticResource SectionHeaderText}"
+                        <TextBlock Text="概览" Style="{StaticResource SectionHeaderText}"
                                    Margin="8,4,0,4" />
+                        <ListView x:Name="DashboardList" SelectionMode="Single"
+                                  Background="Transparent" BorderThickness="0" Padding="0"
+                                  SelectionChanged="OnDashboardSelected">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Height="46">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="28" Height="28" CornerRadius="8"
+                                                VerticalAlignment="Center"
+                                                Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                            <FontIcon Glyph="&#xE246;" FontSize="13" Foreground="White"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0"
+                                                    VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock Text="仪表盘" FontSize="14" FontWeight="Medium" />
+                                            <TextBlock Text="全部用量" FontSize="11"
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+
+                        <TextBlock Text="供应商" Style="{StaticResource SectionHeaderText}"
+                                   Margin="8,10,0,4" />
                         <ListView x:Name="ProviderList" SelectionMode="Single"
                                   Background="Transparent" BorderThickness="0" Padding="0"
                                   SelectionChanged="OnProviderSelected">

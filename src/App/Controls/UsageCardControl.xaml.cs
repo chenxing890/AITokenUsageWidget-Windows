@@ -177,12 +177,17 @@ public sealed partial class UsageCardControl : UserControl
 
             BodyPanel.Children.Add(head);
 
-            // 进度条：4px 圆角轨道 + 用量级别色填充（≥80 红 / ≥50 橙 / 其余绿）
-            BodyPanel.Children.Add(ProgressTrack(percent));
+            // 进度条：4px 圆角轨道 + 用量级别色填充（≥80 红 / ≥50 橙 / 其余绿）；
+            // 7 天窗口叠加半透明灰「健康配额线」（随时间推进，对齐 macOS）
+            BodyPanel.Children.Add(ProgressTrack(percent, HealthyMarker(window, now)));
         }
     }
 
-    private Grid ProgressTrack(double percent)
+    /// <summary>7 天窗口的健康配额线位置（0–100），非 7 天窗口返回 null。</summary>
+    private static double? HealthyMarker(UsageWindow window, DateTimeOffset now) =>
+        window.IsWeekly ? window.HealthyQuotaPercent(now) : null;
+
+    private Grid ProgressTrack(double percent, double? markerPercent = null)
     {
         var grid = new Grid { Height = 4 };
         grid.Children.Add(new Border
@@ -201,6 +206,22 @@ public sealed partial class UsageCardControl : UserControl
             };
             grid.SizeChanged += (_, e) => fill.Width = e.NewSize.Width * clamped / 100.0;
             grid.Children.Add(fill);
+        }
+        if (markerPercent is { } m && m > 0 && m < 100)
+        {
+            // 健康配额线：与进度条同高内嵌（不凸出，保持原高度设计），半透明灰
+            var marker = new Border
+            {
+                Width = 2,
+                Height = 4,
+                CornerRadius = new CornerRadius(1),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xBF, 0x80, 0x80, 0x80)), // Gray ~75%
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            grid.SizeChanged += (_, e) =>
+                marker.Margin = new Thickness(e.NewSize.Width * m / 100.0 - 1, 0, 0, 0);
+            grid.Children.Add(marker);
         }
         return grid;
     }

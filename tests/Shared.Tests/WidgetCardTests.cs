@@ -246,4 +246,53 @@ public class WidgetCardTests
         Assert.Equal("5 分钟后重置", Format.ResetCountdown(Now.AddMinutes(5), Now));
         Assert.Equal("即将重置", Format.ResetCountdown(Now.AddSeconds(3), Now));
     }
+
+    // ---- 7 天窗口健康配额线（对齐 macOS healthyQuotaFraction） ----
+
+    [Fact]
+    public void HealthyQuota_ComputesFromResetTime()
+    {
+        // 重置时间 = 现在 + 3 天 → 起点 = 现在 - 4 天 → 已过 4/7 ≈ 57.14%
+        var window = new UsageWindow { Title = "7 天", ResetTime = Now.AddDays(3) };
+        var marker = window.HealthyQuotaPercent(Now);
+        Assert.NotNull(marker);
+        Assert.Equal(400.0 / 7, marker!.Value, precision: 1);
+    }
+
+    [Fact]
+    public void HealthyQuota_WeeklyOnly_AndNullWithoutReset()
+    {
+        Assert.True(new UsageWindow { Title = "7 天" }.IsWeekly);
+        Assert.False(new UsageWindow { Title = "5 小时" }.IsWeekly);
+        Assert.False(new UsageWindow { Title = "本月总额" }.IsWeekly);
+        Assert.Null(new UsageWindow { Title = "7 天" }.HealthyQuotaPercent(Now)); // 无重置时间
+    }
+
+    [Fact]
+    public void WeeklyWindow_PayloadContainsMarker()
+    {
+        // 7 天窗口（重置时间 = 现在 + 3 天 → 健康线 ≈57%），用实时 now 使占位数据有效
+        var now = DateTimeOffset.UtcNow;
+        var json = WidgetCard.Build(WidgetSize.Large, [Placeholders.Kimi()],
+            ThemePreference.System, false, now, "http://127.0.0.1:49231");
+        // 解码 base64url 载荷，断言含健康线标记 "m":
+        var url = Parse(json).GetProperty("body").EnumerateArray().Single()
+            .GetProperty("items").EnumerateArray()
+            .First(e => e.GetProperty("type").GetString() == "Image")
+            .GetProperty("url").GetString()!;
+        var d = url.Split("&d=")[1].Replace('-', '+').Replace('_', '/');
+        d += d.Length % 4 == 2 ? "==" : d.Length % 4 == 3 ? "=" : "";
+        var payload = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(d));
+        Assert.Contains("\"m\":", payload);
+    }
+
+    [Fact]
+    public void WeeklyWindow_TextFallbackShowsMarkerChar()
+    {
+        // 文本兜底：7 天进度条含刻度字符「▎」
+        var now = DateTimeOffset.UtcNow;
+        var json = WidgetCard.Build(WidgetSize.Large, [Placeholders.Kimi()],
+            ThemePreference.System, false, now, imageBaseUrl: null);
+        Assert.Contains("▎", json);
+    }
 }
