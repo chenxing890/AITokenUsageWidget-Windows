@@ -252,11 +252,25 @@ public class WidgetCardTests
     [Fact]
     public void HealthyQuota_ComputesFromResetTime()
     {
-        // 重置时间 = 现在 + 3 天 → 起点 = 现在 - 4 天 → 已过 4/7 ≈ 57.14%
+        // 重置时间 = 现在 + 3 天 → 起点 = 现在 - 4 天 → 已完整过 4 天 → 4/7 ≈ 57.14%
         var window = new UsageWindow { Title = "7 天", ResetTime = Now.AddDays(3) };
         var marker = window.HealthyQuotaPercent(Now);
         Assert.NotNull(marker);
         Assert.Equal(400.0 / 7, marker!.Value, precision: 1);
+    }
+
+    [Fact]
+    public void HealthyQuota_LastDayCapsAtDay6()
+    {
+        // 剩 8.5 小时（第 6.65 天）→ 已完整过 6 天 → 封顶 6/7 ≈ 85.71%（不画到 100%）
+        var window = new UsageWindow { Title = "7 天", ResetTime = Now.AddHours(8.5) };
+        var marker = window.HealthyQuotaPercent(Now);
+        Assert.NotNull(marker);
+        Assert.Equal(600.0 / 7, marker!.Value, precision: 1);
+
+        // 第 0 天（刚重置，剩 6.9 天）→ 不画线
+        Assert.Null(new UsageWindow { Title = "7 天", ResetTime = Now.AddDays(6.9) }
+            .HealthyQuotaPercent(Now));
     }
 
     [Fact]
