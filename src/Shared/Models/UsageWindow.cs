@@ -30,10 +30,9 @@ public sealed class UsageWindow
 
     /// <summary>
     /// 7 天健康配额线位置（0–100），按天的「当天目标配额」（对齐用户预期）：
-    /// 窗口起点 = 重置时间 − 7 天，已完整过整天数 d = floor(已过天数)（0..6），
-    /// 位置 = d / 7 × 100。第 1 天 14.28%、第 2 天 28.57% … 第 6 天 85.71%；
-    /// 最后一天（d=6）停在 85.71%，不画到 100%（进度条末端无意义）。
-    /// d=0（刚重置当天）返回 null（线在起点无意义，不绘制）。无重置时间返回 null。
+    /// 窗口起点 = 重置时间 − 7 天，当前处于第几天 day = floor(已过天数) + 1（1..7），
+    /// 位置 = day / 7 × 100。第 1 天 14.28%、第 2 天 28.57% … 第 6 天 85.71%，窗口期内始终有线；
+    /// 第 7 天（最后一天）封顶 85.71%，不画到 100%（进度条末端无意义）。无重置时间返回 null。
     /// </summary>
     public double? HealthyQuotaPercent(DateTimeOffset now)
     {
@@ -41,9 +40,8 @@ public sealed class UsageWindow
         var start = reset.AddDays(-7);
         if (now <= start) return null;
         var elapsedDays = (now - start).TotalDays;
-        var d = (int)Math.Floor(elapsedDays); // 已完整过整天数
-        if (d < 1) return null;                  // 第 0 天：起点，不画线
-        d = Math.Min(d, 6);                      // 最后一天封顶第 6 天（85.71%）
-        return d / 7.0 * 100.0;
+        // 当前是第几天（1 起）：第 1 天显示当日目标 1/7，第 7 天封顶第 6 天（85.71%）
+        var day = Math.Min((int)Math.Floor(elapsedDays) + 1, 6);
+        return day / 7.0 * 100.0;
     }
 }

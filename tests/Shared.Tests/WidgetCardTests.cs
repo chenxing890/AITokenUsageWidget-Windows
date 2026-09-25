@@ -252,24 +252,30 @@ public class WidgetCardTests
     [Fact]
     public void HealthyQuota_ComputesFromResetTime()
     {
-        // 重置时间 = 现在 + 3 天 → 起点 = 现在 - 4 天 → 已完整过 4 天 → 4/7 ≈ 57.14%
+        // 重置时间 = 现在 + 3 天 → 起点 = 现在 - 4 天 → 当前第 5 天 → 5/7 ≈ 71.43%
         var window = new UsageWindow { Title = "7 天", ResetTime = Now.AddDays(3) };
         var marker = window.HealthyQuotaPercent(Now);
         Assert.NotNull(marker);
-        Assert.Equal(400.0 / 7, marker!.Value, precision: 1);
+        Assert.Equal(500.0 / 7, marker!.Value, precision: 1);
     }
 
     [Fact]
     public void HealthyQuota_LastDayCapsAtDay6()
     {
-        // 剩 8.5 小时（第 6.65 天）→ 已完整过 6 天 → 封顶 6/7 ≈ 85.71%（不画到 100%）
+        // 剩 8.5 小时（已过 6.65 天，第 7 天）→ 封顶 6/7 ≈ 85.71%（不画到 100%）
         var window = new UsageWindow { Title = "7 天", ResetTime = Now.AddHours(8.5) };
         var marker = window.HealthyQuotaPercent(Now);
         Assert.NotNull(marker);
         Assert.Equal(600.0 / 7, marker!.Value, precision: 1);
 
-        // 第 0 天（刚重置，剩 6.9 天）→ 不画线
-        Assert.Null(new UsageWindow { Title = "7 天", ResetTime = Now.AddDays(6.9) }
+        // 第 1 天（刚重置不久，剩 6.9 天）→ 当日目标 1/7 ≈ 14.28%，窗口期内始终有线
+        var firstDay = new UsageWindow { Title = "7 天", ResetTime = Now.AddDays(6.9) }
+            .HealthyQuotaPercent(Now);
+        Assert.NotNull(firstDay);
+        Assert.Equal(100.0 / 7, firstDay!.Value, precision: 1);
+
+        // 窗口尚未开始（重置时间超过 7 天后）→ 不画线
+        Assert.Null(new UsageWindow { Title = "7 天", ResetTime = Now.AddDays(7.1) }
             .HealthyQuotaPercent(Now));
     }
 
@@ -285,7 +291,7 @@ public class WidgetCardTests
     [Fact]
     public void WeeklyWindow_PayloadContainsMarker()
     {
-        // 7 天窗口（重置时间 = 现在 + 3 天 → 健康线 ≈57%），用实时 now 使占位数据有效
+        // 7 天窗口（重置时间 = 现在 + 3 天 → 健康线 ≈71%），用实时 now 使占位数据有效
         var now = DateTimeOffset.UtcNow;
         var json = WidgetCard.Build(WidgetSize.Large, [Placeholders.Kimi()],
             ThemePreference.System, false, now, "http://127.0.0.1:49231");
