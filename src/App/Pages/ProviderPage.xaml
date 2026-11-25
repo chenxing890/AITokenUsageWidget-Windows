@@ -20,9 +20,15 @@
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </StackPanel>
-                <ToggleSwitch x:Name="EnableToggle"
-                              HorizontalAlignment="Right" VerticalAlignment="Center"
-                              Toggled="OnEnableToggled" />
+                <!-- 启用 + 在小组件显示（对齐 macOS：两段式，上 Widget 需单独勾选，最多 3 个） -->
+                <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="2">
+                    <ToggleSwitch x:Name="EnableToggle" Header="启用"
+                                  Margin="0,0,0,-6" Toggled="OnEnableToggled" />
+                    <ToggleSwitch x:Name="WidgetToggle" Header="在小组件显示"
+                                  Toggled="OnWidgetToggled" />
+                    <TextBlock x:Name="WidgetToggleHint" Style="{StaticResource HintText}"
+                               HorizontalAlignment="Right" />
+                </StackPanel>
             </Grid>
 
             <!-- 未启用提示（对齐 macOS「未启用」GroupCard） -->

@@ -12,6 +12,9 @@ public sealed class ProviderUsage
 {
     public ProviderKind Kind { get; init; }
 
+    /// <summary>对应 ProviderConfig.Id，同 kind 多实例的身份（占位/旧缓存可为 null）。</summary>
+    public Guid? ConfigId { get; init; }
+
     public string DisplayName { get; init; } = "";
 
     public UsageState State { get; init; } = UsageState.Ok;
@@ -40,5 +43,8 @@ public sealed class ProviderUsage
 
     public string CurrencySymbol => Currency == "USD" ? "$" : "¥";
 
-    public string Id => $"{Kind.KindId()}|{DisplayName}";
+    /// <summary>
+    /// 唯一标识：优先用 ConfigId（同 kind 多实例互不冲突），旧缓存/占位回退 kind+显示名。
+    /// </summary>
+    public string Id => ConfigId is { } id ? id.ToString() : $"{Kind.KindId()}|{DisplayName}";
 }

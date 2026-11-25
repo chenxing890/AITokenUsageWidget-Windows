@@ -151,17 +151,92 @@ public class ConfigStoreTests : IDisposable
     }
 
     [Fact]
-    public void LoadWithDefaults_AddsMissingProvidersWithoutOverwriting()
+    public void LoadWithDefaults_MigratesEnabledInstancesToWidgetSelection()
     {
-        var existing = new ProviderConfig(ProviderKind.DeepSeek) { IsEnabled = true, ApiKey = "sk-keep" };
-        _store.Save(new SharedData { Configs = [existing] });
+        // 对齐 macOS：老版本 JSON 无 showInWidget（解码默认 false），
+        // 已启用实例数在 1..3 时自动勾选，避免升级后小组件空白
+        var ds = new ProviderConfig(ProviderKind.DeepSeek) { IsEnabled = true, ApiKey = "sk-a" };
+        var kimi = new ProviderConfig(ProviderKind.Kimi) { IsEnabled = true, ApiKey = "sk-b" };
+        _store.Save(new SharedData { Configs = [ds, kimi] });
 
         var data = _store.LoadWithDefaults();
-        Assert.Equal(3, data.Configs.Count);
-        var deep = data.Configs.Single(c => c.Kind == ProviderKind.DeepSeek);
-        Assert.True(deep.IsEnabled); // 已有配置不覆盖
-        Assert.Equal("sk-keep", deep.ApiKey);
-        Assert.Contains(data.Configs, c => c.Kind == ProviderKind.Kimi && !c.IsEnabled);
+        Assert.Equal(2, data.Configs.Count); // 不再按 kind 补齐缺失供应商
+        Assert.All(data.Configs, c => Assert.True(c.ShowInWidget)); // 已启用实例自动勾选
+
+        Assert.All(_store.Load().Configs, c => Assert.True(c.ShowInWidget)); // 迁移已持久化
+    }
+
+    [Fact]
+    public void LoadWithDefaults_NoMigration_WhenSelectionAlreadyMade()
+    {
+        var ds = new ProviderConfig(ProviderKind.DeepSeek) { IsEnabled = true, ShowInWidget = true };
+        var kimi = new ProviderConfig(ProviderKind.Kimi) { IsEnabled = true }; // 未勾选
+        _store.Save(new SharedData { Configs = [ds, kimi] });
+
+        var data = _store.LoadWithDefaults();
+        Assert.True(data.Configs.Single(c => c.Kind == ProviderKind.DeepSeek).ShowInWidget);
+        Assert.False(data.Configs.Single(c => c.Kind == ProviderKind.Kimi).ShowInWidget); // 不动已有勾选
+    }
+
+    [Fact]
+    public void LoadWithDefaults_NoMigration_WhenMoreThanThreeEnabled()
+    {
+        var configs = Enumerable.Range(0, 4)
+            .Select(_ => new ProviderConfig(ProviderKind.Kimi) { IsEnabled = true })
+            .ToList();
+        _store.Save(new SharedData { Configs = configs });
+
+        var data = _store.LoadWithDefaults();
+        Assert.All(data.Configs, c => Assert.False(c.ShowInWidget)); // 超上限不自动勾选
+    }
+
+    [Fact]
+    public void LoadWithDefaults_NoMigration_WhenNothingEnabled()
+    {
+        _store.Save(new SharedData { Configs = [new ProviderConfig(ProviderKind.Glm)] });
+        var data = _store.LoadWithDefaults();
+        Assert.All(data.Configs, c => Assert.False(c.ShowInWidget));
+    }
+
+    [Fact]
+    public void SameKindMultiInstance_KeepsSeparateIdentity()
+    {
+        // 对齐 macOS：同 kind 多实例各有一份配置，按 Id 保存互不覆盖
+        var a = new ProviderConfig(ProviderKind.Kimi) { ApiKey = "sk-a", IsEnabled = true };
+        var b = new ProviderConfig(ProviderKind.Kimi) { ApiKey = "sk-b", CustomName = "Kimi 备用" };
+        _store.SaveConfig(a);
+        _store.SaveConfig(b);
+
+        var loaded = _store.Load().Configs;
+        Assert.Equal(2, loaded.Count);
+        Assert.Equal([a.Id, b.Id], loaded.Select(c => c.Id));
+        Assert.Equal(["sk-a", "sk-b"], loaded.Select(c => c.ApiKey));
+
+        b.CustomName = "改名";
+        _store.SaveConfig(b);
+        loaded = _store.Load().Configs;
+        Assert.Equal(2, loaded.Count); // 仍为两份
+        Assert.Equal("改名", loaded.Single(c => c.Id == b.Id).CustomName);
+
+        _store.DeleteConfig(a.Id);
+        loaded = _store.Load().Configs;
+        Assert.Equal([b.Id], loaded.Select(c => c.Id)); // 只删目标实例
+    }
+
+    [Fact]
+    public void WidgetConfigs_ReturnsEnabledAndShownOnly()
+    {
+        _store.Save(new SharedData
+        {
+            Configs =
+            [
+                new ProviderConfig(ProviderKind.DeepSeek) { IsEnabled = true, ShowInWidget = true },
+                new ProviderConfig(ProviderKind.Kimi) { IsEnabled = true }, // 未勾选
+                new ProviderConfig(ProviderKind.Glm) { ShowInWidget = true }, // 未启用
+            ],
+        });
+        var widget = _store.WidgetConfigs();
+        Assert.Equal([ProviderKind.DeepSeek], widget.Select(c => c.Kind));
     }
 
     [Fact]
@@ -180,6 +255,7 @@ public class ConfigStoreTests : IDisposable
         var usage = new ProviderUsage
         {
             Kind = ProviderKind.Glm,
+            ConfigId = Guid.NewGuid(),
             DisplayName = "GLM Coding",
             State = UsageState.Error,
             ErrorMessage = "网络连接失败，请检查网络",
@@ -194,10 +270,21 @@ public class ConfigStoreTests : IDisposable
 
         var loaded = _store.Load().CachedUsages;
         var round = Assert.Single(loaded);
+        Assert.Equal(usage.ConfigId, round.ConfigId); // configId 往返（多实例身份）
         Assert.Equal(UsageState.Error, round.State);
         Assert.Equal("网络连接失败，请检查网络", round.ErrorMessage);
         Assert.Equal(88.4, round.Windows[0].UsedPercent);
         Assert.Equal("5524万 tokens · 99 次", round.Windows[1].UsedText);
+    }
+
+    [Fact]
+    public void LegacyJsonWithoutShowInWidget_DecodesFalse()
+    {
+        // 容错解码：旧 JSON 缺 showInWidget / configId 字段默认 false / null
+        File.WriteAllText(SharedPath, """{"configs":[{"kind":"kimi","isEnabled":true}]}""");
+        var data = _store.Load();
+        var kimi = Assert.Single(data.Configs);
+        Assert.False(kimi.ShowInWidget);
     }
 
     [Fact]

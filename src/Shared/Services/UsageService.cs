@@ -53,6 +53,7 @@ public sealed class UsageService
     private static ProviderUsage Usage(UsageState state, ProviderConfig config, string? message = null) => new()
     {
         Kind = config.Kind,
+        ConfigId = config.Id,
         DisplayName = config.Name,
         State = state,
         ErrorMessage = state == UsageState.Error ? message ?? "请求失败" : null,
@@ -76,6 +77,7 @@ public sealed class UsageService
         return new ProviderUsage
         {
             Kind = ProviderKind.DeepSeek,
+            ConfigId = config.Id,
             DisplayName = config.Name,
             State = UsageState.Ok,
             Currency = info.Property("currency").Str(),
@@ -91,8 +93,11 @@ public sealed class UsageService
     // ---- Kimi Code（5 小时 / 7 天 / 月度总额） ----
 
     /// <summary>
-    /// GET /usages —— limits[].window.duration == 300（分钟）为 5 小时窗口（数据在 detail 内），
-    /// 顶层 usage 为 7 天窗口；月度走非官方 billing 接口（可选，失败静默忽略）。
+    /// GET /usages —— limits[].window.duration == 300（分钟）为 5 小时窗口（数据在 detail 内）；
+    /// 顶层 usage 为 7 天窗口（老套餐）。新套餐（如 kimi-166）无 7 天窗口，改为返回
+    /// usages.limit_month_total（月度总额，used_ratio 0..1 + reset_time，免 Cookie）。
+    /// 月度总额仍可通过网页 billing 接口（kimi-auth Cookie，可选）拿到绝对数值版；
+    /// 若配置了 Cookie，用绝对数值版覆盖「本月总额」（信息更详细）。
     /// </summary>
     private async Task<ProviderUsage> FetchKimiAsync(ProviderConfig config)
     {
@@ -114,12 +119,19 @@ public sealed class UsageService
                 if (window != null) windows.Add(window);
             }
         }
-        // 7 天窗口：顶层 usage
+        // 7 天窗口（老套餐）：顶层 usage
         if (MakeKimiWindow("7 天", json.Property("usage")) is { } weekly)
             windows.Add(weekly);
-        // 月度总额（可选）
-        if (config.HasExtraToken && await FetchKimiMonthlyAsync(config.ExtraToken.Trim()) is { } monthly)
-            windows.Add(monthly);
+
+        // 月度窗口（新套餐，免 Cookie）：usages.limit_month_total
+        // （与 limit_month_code 数据基本重合，只显示总额即可；老套餐的 7 天窗口保留兼容）
+        var monthlyCookieWindow = config.HasExtraToken
+            ? await FetchKimiMonthlyAsync(config.ExtraToken.Trim())
+            : null;
+        if (MakeRatioWindow("本月总额", json.Property("usages").Property("limit_month_total")) is { } total)
+            windows.Add(monthlyCookieWindow ?? total);
+        else if (monthlyCookieWindow is { } cookie)
+            windows.Add(cookie);
 
         if (windows.Count == 0)
             throw new ApiException("服务器返回为空");
@@ -127,6 +139,7 @@ public sealed class UsageService
         return new ProviderUsage
         {
             Kind = ProviderKind.Kimi,
+            ConfigId = config.Id,
             DisplayName = config.Name,
             State = UsageState.Ok,
             Windows = windows,
@@ -153,6 +166,21 @@ public sealed class UsageService
         {
             return null; // 静默忽略，不影响前两个窗口
         }
+    }
+
+    /// <summary>Kimi 新套餐月度窗口结构 { used_ratio: 0..1, reset_time }，只给百分比。</summary>
+    private static UsageWindow? MakeRatioWindow(string title, JsonElement? detail)
+    {
+        if (detail is null) return null;
+        var ratio = detail.Value.Property("used_ratio").Dbl();
+        if (ratio is null) return null;
+        return new UsageWindow
+        {
+            Title = title,
+            UsedPercent = Math.Clamp(ratio.Value * 100, 0, 100),
+            UsedText = null,
+            ResetTime = detail.Value.Property("reset_time").IsoDate(),
+        };
     }
 
     /// <summary>Kimi 窗口结构 { limit, used, remaining, resetTime }，数字以字符串返回；
@@ -269,6 +297,7 @@ public sealed class UsageService
         return new ProviderUsage
         {
             Kind = ProviderKind.Glm,
+            ConfigId = config.Id,
             DisplayName = config.Name,
             State = UsageState.Ok,
             Windows = windows,

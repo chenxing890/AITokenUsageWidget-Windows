@@ -120,7 +120,8 @@ public static class WidgetRefreshService
 
         var generation = Interlocked.Increment(ref _refreshGeneration);
         var data = Store.Load();
-        var activeConfigs = data.Configs.Where(c => c.IsEnabled).ToList();
+        // Widget 取数走 widgetConfigs()：已启用 且 勾选「在小组件显示」（对齐 macOS）
+        var activeConfigs = data.Configs.Where(c => c.IsEnabled && c.ShowInWidget).ToList();
 
         List<ProviderUsage> usages;
         if (activeConfigs.Count == 0)
@@ -137,13 +138,16 @@ public static class WidgetRefreshService
             {
                 if (usages[i].State != UsageState.Ok)
                 {
-                    var cached = data.CachedUsages.FirstOrDefault(
-                        u => u.Kind == usages[i].Kind && u.State == UsageState.Ok);
+                    // 同 kind 多实例按 ConfigId 匹配缓存；旧缓存无 ConfigId 回退 kind
+                    var cached = data.CachedUsages.FirstOrDefault(u =>
+                        (usages[i].ConfigId is { } id ? u.ConfigId == id : u.ConfigId == null)
+                        && u.Kind == usages[i].Kind && u.State == UsageState.Ok);
                     if (cached != null)
                     {
                         usages[i] = new ProviderUsage
                         {
                             Kind = cached.Kind,
+                            ConfigId = usages[i].ConfigId,
                             DisplayName = usages[i].DisplayName,
                             State = UsageState.Ok,
                             Currency = cached.Currency,

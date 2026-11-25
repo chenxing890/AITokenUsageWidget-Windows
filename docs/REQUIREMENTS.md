@@ -1,7 +1,7 @@
 # AITokenUsageWidget for Windows — 需求与设计文档
 
-> 版本：v1.0（设计稿）
-> 对应 macOS 原版：AITokenUsageWidget v1.0（github.com/chenxing890/AITokenUsageWidget）
+> 版本：v1.1（设计稿，已同步 macOS 端 2026-11-11 三笔需求变化）
+> 对应 macOS 原版：AITokenUsageWidget（github.com/chenxing890/AITokenUsageWidget，对齐至 commit c7d152e / 002e394 / 9d0a8bb）
 > 目标：在 Windows 平台实现与 macOS 版**完全相同的功能**，并符合 Windows 界面规范与用户交互习惯。
 > 状态：本文档仅包含需求与设计，不含代码实现。
 
@@ -12,6 +12,14 @@
 ### 1.1 背景
 
 macOS 版 AITokenUsageWidget 是一款通知中心小组件，实时显示 DeepSeek、Kimi Code（Moonshot）、GLM Coding（智谱）三家 AI 供应商的账户余额与 API 额度用量。本项目将其完整移植到 Windows 平台，以 **Windows 小组件（Windows Widgets）+ 主配置 App** 的形态交付。
+
+### 1.2 v1.1 同步的 macOS 端变化（2026-11-11）
+
+| 变化 | 内容 | 对应章节 |
+|---|---|---|
+| 同模型多实例 | 同一供应商可添加多个实例（各自 API Key / 显示名），身份用 configId 区分；Widget、告警、仪表盘、缓存全部按实例隔离 | FR-2、FR-3、FR-4、FR-5、FR-6 |
+| 在小组件显示开关 | 实例级「在小组件显示」勾选（最多 3 个，触顶提示回退）；Widget 仅显示「已启用且勾选」的实例；老用户一次性迁移自动勾选已启用实例 | FR-2、FR-3、FR-5 |
+| Kimi 新套餐兼容 | 新套餐 /usages 不再返回顶层 7 天窗口，改为 usages.limit_month_total（百分比 + 重置时间，免 Cookie）；老套餐 7 天窗口保留兼容；Cookie 绝对值版仍可覆盖「本月总额」；不再重复显示「本月 Coding」 | FR-1 |
 
 ### 1.2 产品定位
 
@@ -44,12 +52,12 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
 | 供应商 | 显示内容 | 接口 | 鉴权 |
 |---|---|---|---|
 | **DeepSeek** | 账户余额：总余额 / 赠送 / 充值 + 可用状态指示 | GET https://api.deepseek.com/user/balance | Authorization: Bearer {apiKey} |
-| **Kimi Code** | 5 小时窗口 / 7 天窗口（百分比 + 重置倒计时）；月度总额（可选，需 kimi-auth Cookie） | GET https://api.kimi.com/coding/v1/usages；月度：网页 billing 接口 POST https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages（body 为 {}） | Bearer Key；月度用 Cookie |
+| **Kimi Code** | 5 小时窗口 / 7 天窗口（老套餐，百分比 + 重置倒计时）；「本月总额」（新套餐免 Cookie 百分比版，配置 kimi-auth Cookie 时为绝对数值版） | GET https://api.kimi.com/coding/v1/usages；月度（Cookie 兜底/覆盖）：网页 billing 接口 POST https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages（body 为 {}） | Bearer Key；月度绝对值版用 Cookie |
 | **GLM Coding（智谱）** | 5 小时 / 7 天（百分比，unit 3/6 判定；缺 unit 按重置时间排序）；月度工具（TIME_LIMIT，次数绝对值）；30 天累计（token 数 + 调用次数，中文大数格式化） | GET https://open.bigmodel.cn/api/monitor/usage/quota/limit；GET .../api/monitor/usage/model-usage?startTime&endTime（近 30 天） | Authorization: {apiKey}（无 Bearer 前缀） |
 
 解析规则（与 macOS 版一致，实现时逐条对照）：
 
-- **Kimi**：limits[] 中 window.duration == 300（分钟）→ 5 小时窗口；顶层 usage → 7 天窗口；窗口结构 {limit, used, remaining, resetTime}，数字以字符串返回；used 缺失时用 limit - remaining 计算；月度接口失败静默忽略，不影响前两个窗口。
+- **Kimi**：limits[] 中 window.duration == 300（分钟）→ 5 小时窗口；顶层 usage → 7 天窗口（**老套餐**）；窗口结构 {limit, used, remaining, resetTime}，数字以字符串返回；used 缺失时用 limit - remaining 计算。**新套餐**（如 kimi-166）无顶层 7 天窗口，改为 usages.limit_month_total = {used_ratio: 0..1, reset_time}（免 Cookie，解析为「本月总额」百分比窗口）；limit_month_code 与 limit_month_total 数据基本重合，**不显示**「本月 Coding」。若配置了 Cookie，用网页 billing 接口的绝对数值版**覆盖**「本月总额」（信息更详细）；ratio 解析失败时回退 Cookie 版；月度接口失败静默忽略，不影响其他窗口。
 - **GLM**：HTTP 200 也可能业务失败，必须检查 success == false / error / code != 200 并透出 msg；CREDIT_LIMIT（新套餐）返回绝对值 currentValue/usage，TOKENS_LIMIT（老套餐）仅百分比；30 天累计失败静默忽略；大数格式化 55237346 → "5524万"，≥1 亿显示「x.x亿」。
 - **DeepSeek**：balance_infos[0] 取 total_balance / granted_balance / topped_up_balance / currency，is_available 取顶层；空响应视为错误。
 - **通用**：查询接口不消耗模型 token；Key 未填返回 missingKey 状态；网络/解析失败返回中文友好错误提示（401→"API Key 无效或已过期"、超时→"请求超时，请检查网络"等）。
@@ -57,9 +65,9 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
 ### FR-2 小组件
 
 - **尺寸**：支持中（Medium）、大（Large）两种；Windows Widgets 无 macOS 的 small，不提供。
-- **内容**：仅显示已启用的供应商卡片。
-  - 中尺寸：1–2 个供应商为宽松双列；3 个供应商自动切换**紧凑三列**（dense 模式：单行短标题「5h」「7d」「月度」、小字号、紧凑间距）。
-  - 大尺寸：纵向列表，每个供应商一块，含进度条与重置倒计时。
+- **内容**：仅显示「已启用 且 勾选在小组件显示」的供应商实例卡片（`widgetConfigs()` = isEnabled && showInWidget，**最多 3 个**，由设置界面限制）。
+  - 中尺寸：1–2 个实例为宽松双列；3 个实例自动切换**紧凑三列**（dense 模式：单行短标题「5h」「7d」「月度」、小字号、紧凑间距）。
+  - 大尺寸：纵向列表，每个实例一块，含进度条与重置倒计时；同 kind 多实例同屏各自成块（按 configId 区分）。
 - **卡片内容**：
   - 余额型（DeepSeek）：货币符号（CNY→¥，USD→$）+ 总余额大字 + 赠送/充值明细 + 可用状态点。
   - 窗口型（Kimi/GLM）：每窗口显示标题、已用百分比、进度条（品牌色）、重置倒计时（如「2 小时后重置」）；GLM 月度工具/30 天累计显示绝对值文本。
@@ -71,13 +79,14 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
 ### FR-3 主配置界面（设置窗口）
 
 - **布局**：WinUI 3 NavigationView 左侧导航（遵循 Fluent Design）：
-  - **概览 → 仪表盘**（仅当至少一个供应商启用时显示；全部关闭时自动隐藏）：聚合全部已启用供应商的用量卡片，每个供应商一行（大尺寸三行布局，与小组件 large 一致）。已配置 Key 的卡片显示实际用量（进入自动拉取 + 顶部「刷新」按钮），未配置的显示模拟数据 + 右上角橙色「模拟」角标；底部标注更新时间。关掉某供应商开关，该卡片立即从仪表盘消失
-  - 供应商分组：DeepSeek / Kimi Code / GLM Coding（各含图标、名称、副标题、启用状态徽标）
+  - **概览 → 仪表盘**（仅当至少一个实例启用时显示；全部关闭时自动隐藏）：聚合全部已启用实例的用量卡片，每个实例一行（大尺寸三行布局，与小组件 large 一致）；同 kind 多实例同屏各自成行，**取数键用 config.Id**（互不覆盖）。已配置 Key 的卡片显示实际用量（进入自动拉取 + 顶部「刷新」按钮），未配置的显示模拟数据 + 右上角橙色「模拟」角标；底部标注更新时间。关掉某实例开关，该卡片立即从仪表盘消失
+  - 供应商分组：**每个配置实例一行**（同模型可多个；图标、名称〔自定义显示名，缺省为模型名〕、副标题、启用状态徽标）；分组标题旁「**+**」菜单新增实例（新增 DeepSeek / Kimi / GLM）；**右键行 →「删除」**，弹确认对话框（「删除 {name}？该实例的 API Key 与自定义名称将被移除，此操作不可撤销。」）；删除当前选中的实例后，导航自动回退到第一个实例
   - 外观：主题选择（跟随系统 / 浅色 / 深色，三段式 Segmented 控件）
   - 通知：告警总开关 + 阈值下拉选择（50% / 60% / 70% / 80% / 90% / 95%，默认 80%）
   - 底部：版本号、数据目录快捷入口
 - **供应商详情页**：
-  - 「启用」开关（ToggleSwitch）
+  - 「启用」开关（ToggleSwitch）：启用后卡片出现在主界面仪表盘；上小组件还需打开下方开关
+  - **「在小组件显示」开关**（ToggleSwitch，启用开关下方）：勾选后该实例进入 Windows 小组件；**最多 3 个**，触顶时弹提示（「小组件位置已满：最多 3 个实例显示在小组件，请先在其他实例的详情页关闭」）并自动回退不保存；开关下方实时提示「已勾选 n/3」（未勾选时显示「最多 3 个」）
   - API Key 输入框（PasswordBox 带显示/隐藏切换），格式提示（如 sk-xxx），自动清洗（去首尾空白、剥离误粘贴的 "Bearer " 前缀）
   - 自定义显示名、自定义接口根地址（留空用默认）
   - Kimi 额外提供 kimi-auth Cookie 输入项（可选，注明用于月度总额，非官方接口）
@@ -96,7 +105,7 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
   - 标题：「{供应商显示名} 用量告警」
   - 正文：「{窗口名}已使用 {N}%，达到告警阈值 {M}%。」
   - 默认提示音；点击通知打开主 App 对应供应商页面。
-- **防重复**：同一「供应商-窗口」（key = {kind}-{windowTitle}）在越过阈值期间只通知一次。
+- **防重复**：同一「实例-窗口」（key = {configId}-{windowTitle}；旧缓存/占位无 configId 时回退 {kind}-{windowTitle}，保持历史记录兼容）在越过阈值期间只通知一次；同 kind 多实例同窗口各自独立告警、互不吞并。
 - **回落重置**：该窗口回落到「阈值 − 10%」以下后清除已通知标记，下次冲高可再次提醒（覆盖额度周期重置场景）。
 - **开关与阈值**：主界面可全局开关（默认开）并下拉选择阈值（默认 80%）；修改阈值后清空已通知记录并立即重评估。
 - 余额型供应商（DeepSeek）不参与百分比告警。
@@ -114,13 +123,16 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
       "id": "uuid",
       "kind": "deepseek | kimi | glm",
       "isEnabled": false,
+      "showInWidget": false,
       "apiKey": "",
       "baseURLOverride": "",
       "customName": "",
       "extraToken": ""
     }
   ],
-  "cachedUsages": [],
+  "cachedUsages": [
+    { "kind": "kimi", "configId": "uuid | 缺省", "displayName": "…", "…": "…" }
+  ],
   "theme": "system | light | dark",
   "alertedKeys": [],
   "alertsEnabled": true,
@@ -134,12 +146,14 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
   3. **写前备份**：每次写入前把现有文件复制为 shared.json.bak。
   4. 写入采用「临时文件 + 原子替换」（先写 shared.json.tmp 再替换），防断电写坏。
 - **并发**：主 App 与小组件后台任务可能同时读写，使用命名 Mutex 串行化；读取失败（锁冲突）时短暂重试（最多 3 次，间隔 100ms）。
-- **敏感信息保护**：API Key / Cookie 在磁盘上使用 **DPAPI**（ProtectedData，CurrentUser 范围）加密存储，JSON 中仅保存密文 Base64；内存中即用即清。
-- **默认配置**：首次运行生成三家供应商的默认配置（isEnabled=false）；版本升级新增供应商时自动补齐，不覆盖已有配置。
+- **敏感信息保护**：API Key / Cookie 在磁盘上使用 **DPAPI**（ProtectedData，CurrentUser 范围）加密存储，JSON 中仅保存密文 Base64；内存中即用即解。
+- **默认配置与升级**：首次运行生成三家供应商的默认配置（isEnabled=false）；同 kind 支持多实例后**不再按 kind 自动补齐**缺失供应商（对齐 macOS）；升级到多实例版本时执行**一次性 Widget 勾选迁移**——若所有实例都未勾选 showInWidget 且已启用实例数在 1..3，自动把已启用实例勾上小组件，避免升级后小组件空白（迁移结果持久化）。
+- **按实例读写**：configs 的增删改均按 `id` 定位（SaveConfig 按 id 更新或追加、DeleteConfig 按 id 删除），同 kind 多实例互不覆盖。
 
 ### FR-6 用量缓存
 
-- 每次成功抓取后写入 cachedUsages；小组件快照/刷新失败时回退显示缓存并标注时间；无任何缓存时显示占位数据（预览场景）。
+- 每次成功抓取后写入 cachedUsages（含 configId 身份）；小组件快照/刷新失败时回退显示缓存并标注时间；无任何缓存时显示占位数据（预览场景）。
+- 缓存匹配按 **configId**（同 kind 多实例各自命中自己的缓存）；旧缓存无 configId 时回退按 kind 匹配，保持升级兼容。
 
 ---
 
@@ -172,10 +186,12 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
 │ 标题栏（Mica）                                            │
 ├──────────────┬───────────────────────────────────────────┤
 │ Navigation   │  供应商详情 / 外观 / 通知                   │
-│  ▸ 供应商     │  ┌─ 启用 ───────────────[Toggle] ─┐        │
+│  ▸ 概览      │  ┌─ 启用 ───────────────[Toggle] ─┐        │
+│  ▸ 供应商 [+]│  ├─ 在小组件显示 ──────[Toggle] ─┤        │
 │    DeepSeek  │  │ API Key  [***********] [👁][测试] │        │
 │    Kimi Code │  │ 显示名 [      ] 接口地址 [      ]  │        │
 │    GLM       │  │ [打开控制台]                     │        │
+│   （每个实例一行，同模型可多个；「+」新增、右键删除）        │
 │  ──────────  │  └────────────────────────────────┘        │
 │  ▸ 外观      │  ┌─ 小组件预览 ───────────────[模拟]─┐      │
 │    主题选择   │  │   （实时渲染的卡片预览）            │      │
@@ -208,9 +224,11 @@ Windows 版必须与 macOS v1.0 功能一一对应。对照总表：
 
 ### 4.2 配置供应商
 
-1. 左侧导航选择供应商 → 打开「启用」→ 粘贴 API Key（自动清洗、自动保存、DPAPI 加密落盘）。
+1. 左侧导航选择供应商实例 → 打开「启用」→ 粘贴 API Key（自动清洗、自动保存、DPAPI 加密落盘）。
 2. 点「测试连接」→ 按钮进入加载态 → 成功显示绿色 InfoBar + 预览刷新为实际用量；失败显示红色 InfoBar + 中文错误。
-3. 保存后立即触发小组件刷新（命名事件通知 Provider，或待其下一次读取共享文件）。
+3. **上小组件**：打开「在小组件显示」开关（最多 3 个，触顶弹提示回退；开关下方实时显示「已勾选 n/3」）。
+4. **多实例**：侧栏「+」菜单新增实例（同模型可多个，各自 API Key / 显示名）；右键行 →「删除」→ 确认后移除；删除当前实例后自动回退到第一个实例。
+5. 保存后立即触发小组件刷新（命名事件通知 Provider，或待其下一次读取共享文件）。
 
 ### 4.3 日常查看
 
@@ -383,7 +401,7 @@ ProviderConfig(共享JSON) ──► UsageService.fetchAll(并发抓取三家)
 与 macOS 版一致，预览与小组件空态使用：
 
 - DeepSeek：CNY，总余额 ¥88.50（赠送 10.00 / 充值 78.50），可用
-- Kimi：5h 42%（2 小时后重置）、7d 68%（3 天后重置）、本月 35%（12 天后重置）
+- Kimi：5h 42%（2 小时后重置）、7d 68%（3 天后重置）、本月总额 35%（12 天后重置）
 - GLM：5h 21%（1 小时后重置）、7d 55%（4 天后重置）、月度工具 12%「126/1000 次」（18 天后重置）
 
 ## 附录 B：告警判定伪代码
@@ -392,7 +410,8 @@ ProviderConfig(共享JSON) ──► UsageService.fetchAll(并发抓取三家)
 threshold = 配置阈值(默认80); resetBelow = threshold - 10
 for usage in usages where state == ok:
     for window in usage.windows where usedPercent != null:
-        key = "{kind}-{window.title}"
+        configKey = usage.configId?.uuid ?? usage.kind     // 多实例按 configId；旧缓存回退 kind
+        key = "{configKey}-{window.title}"
         if percent >= threshold and key not in alerted:
             alerted.add(key)
             发送Toast("{displayName} 用量告警", "{title}已使用{p}%，达到告警阈值{t}%。")

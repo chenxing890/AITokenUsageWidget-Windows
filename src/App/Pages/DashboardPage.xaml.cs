@@ -9,8 +9,9 @@ using Microsoft.UI.Xaml.Controls;
 namespace AITokenUsageWidget.App.Pages;
 
 /// <summary>
-/// 仪表盘（对齐 macOS DashboardView）：聚合全部已启用供应商的用量卡片，
-/// 每个供应商一行（大尺寸三行布局，与小组件 large 一致）。
+/// 仪表盘（对齐 macOS DashboardView）：聚合全部已启用实例的用量卡片，
+/// 每个实例一行（大尺寸三行布局，与小组件 large 一致）；同 kind 多实例同屏各自成行，
+/// 取数键用 config.Id（互不覆盖，对齐 macOS 缓存键改造）。
 /// 已配置 Key 的显示实际用量（进入自动拉取）；未配置的显示模拟数据 + 橙色「模拟」角标。
 /// </summary>
 public sealed partial class DashboardPage : Page
@@ -39,7 +40,7 @@ public sealed partial class DashboardPage : Page
         {
             var card = new Controls.UsageCardControl();
             // 先上占位（模拟），拉取成功后替换为实际数据
-            card.Usage = config.HasKey ? Placeholders.For(config.Kind) : Placeholders.For(config.Kind);
+            card.Usage = Placeholders.For(config.Kind, config.Id, config.Name);
             CardsPanel.Children.Add(WrapWithBadge(card, showSimulated: !config.HasKey));
         }
 
@@ -49,10 +50,7 @@ public sealed partial class DashboardPage : Page
     }
 
     private static List<ProviderConfig> EnabledConfigs() =>
-        ProviderKindExtensions.All
-            .Select(AppSettings.Config)
-            .Where(c => c.IsEnabled)
-            .ToList();
+        AppSettings.Data.Configs.Where(c => c.IsEnabled).ToList();
 
     /// <summary>给卡片包一层 Grid，未配置时右上角叠橙色「模拟」角标。</summary>
     private static Grid WrapWithBadge(Controls.UsageCardControl card, bool showSimulated)
@@ -106,14 +104,15 @@ public sealed partial class DashboardPage : Page
 
             RunOnUi(() =>
             {
-                // 用实际数据重建（保留未配置供应商的模拟卡片在最后）
+                // 用实际数据重建（保留未配置实例的模拟卡片在最后）；
+                // 键用 config.Id —— 同 kind 多实例同屏各自取数，互不覆盖
                 var enabled = EnabledConfigs();
                 CardsPanel.Children.Clear();
                 foreach (var config in enabled)
                 {
                     var card = new Controls.UsageCardControl();
-                    var live = usages.FirstOrDefault(u => u.Kind == config.Kind);
-                    card.Usage = live ?? Placeholders.For(config.Kind);
+                    var live = usages.FirstOrDefault(u => u.ConfigId == config.Id);
+                    card.Usage = live ?? Placeholders.For(config.Kind, config.Id, config.Name);
                     CardsPanel.Children.Add(WrapWithBadge(card, showSimulated: live == null || live.IsSimulated));
                 }
                 var latest = usages.Count > 0 ? usages.Max(u => u.FetchedAt) : DateTimeOffset.UtcNow;

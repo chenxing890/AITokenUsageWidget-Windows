@@ -109,8 +109,8 @@ public sealed class ConfigStore
     }
 
     /// <summary>
-    /// 读取并保证默认配置存在：首次运行生成三家供应商默认配置（停用）；
-    /// 版本升级新增供应商时自动补齐，不覆盖已有配置。
+    /// 读取并保证默认配置存在：首次运行生成三家供应商默认配置（停用）。
+    /// 同 kind 多实例后不再按 kind 补齐（对齐 macOS）；升级走一次性 Widget 勾选迁移。
     /// </summary>
     public SharedData LoadWithDefaults()
     {
@@ -125,19 +125,31 @@ public sealed class ConfigStore
                 .ToList();
             changed = true;
         }
-        else
-        {
-            var existing = data.Configs.Select(c => c.Kind).ToHashSet();
-            var missing = ProviderKindExtensions.All.Where(kind => !existing.Contains(kind)).ToList();
-            if (missing.Count > 0)
-            {
-                data.Configs.AddRange(missing.Select(kind => new ProviderConfig(kind)));
-                changed = true;
-            }
-        }
+
+        // 一次性迁移（对齐 macOS）：老版本 JSON 没有 showInWidget 字段（解码默认 false），
+        // 若所有实例都未勾选且已启用实例数在 1..3，自动把已启用实例勾上 Widget，
+        // 避免升级后小组件空白。
+        if (MigrateWidgetSelectionIfNeeded(data)) changed = true;
+
         if (changed) Save(data);
         return data;
     }
+
+    private static bool MigrateWidgetSelectionIfNeeded(SharedData data)
+    {
+        if (data.Configs.Any(c => c.ShowInWidget)) return false;
+        var enabledCount = data.Configs.Count(c => c.IsEnabled);
+        if (enabledCount is < 1 or > 3) return false;
+        foreach (var config in data.Configs)
+        {
+            if (config.IsEnabled) config.ShowInWidget = true;
+        }
+        return true;
+    }
+
+    /// <summary>小组件取数的配置集合：已启用且勾选「在小组件显示」（与 macOS widgetConfigs 对齐）。</summary>
+    public List<ProviderConfig> WidgetConfigs() =>
+        Load().Configs.Where(c => c.IsEnabled && c.ShowInWidget).ToList();
 
     // ---- 写入 ----
 
@@ -192,16 +204,26 @@ public sealed class ConfigStore
     // 所有方法遵循同一铁律：Load 失败（IO 异常 / 未取得锁）时立即中止，
     // 绝不把空负载回写覆盖用户的已配置内容。
 
-    public ProviderConfig? FindConfig(ProviderKind kind) =>
-        Load().Configs.FirstOrDefault(c => c.Kind == kind);
+    public ProviderConfig? FindConfig(Guid id) =>
+        Load().Configs.FirstOrDefault(c => c.Id == id);
 
+    /// <summary>按 Id 保存（不存在则追加）——同 kind 多实例互不覆盖。</summary>
     public void SaveConfig(ProviderConfig config)
     {
         var data = Load();
         if (LastLoadFailed) return;
-        var index = data.Configs.FindIndex(c => c.Kind == config.Kind);
+        var index = data.Configs.FindIndex(c => c.Id == config.Id);
         if (index >= 0) data.Configs[index] = config;
         else data.Configs.Add(config);
+        Save(data);
+    }
+
+    /// <summary>按 Id 删除实例（同 kind 多实例时只删选中的那个）。</summary>
+    public void DeleteConfig(Guid id)
+    {
+        var data = Load();
+        if (LastLoadFailed) return;
+        data.Configs.RemoveAll(c => c.Id == id);
         Save(data);
     }
 

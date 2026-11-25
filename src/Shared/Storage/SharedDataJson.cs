@@ -47,6 +47,7 @@ public static class SharedDataJson
         writer.WriteString("id", config.Id);
         writer.WriteString("kind", config.Kind.KindId());
         writer.WriteBoolean("isEnabled", config.IsEnabled);
+        writer.WriteBoolean("showInWidget", config.ShowInWidget);
         writer.WriteString("apiKey", config.ApiKey.Length == 0 ? "" : protector.Protect(config.ApiKey));
         writer.WriteString("baseURLOverride", config.BaseURLOverride);
         writer.WriteString("customName", config.CustomName);
@@ -58,6 +59,7 @@ public static class SharedDataJson
     {
         writer.WriteStartObject();
         writer.WriteString("kind", usage.Kind.KindId());
+        if (usage.ConfigId is { } configId) writer.WriteString("configId", configId.ToString());
         writer.WriteString("displayName", usage.DisplayName);
         writer.WriteString("state", usage.State switch
         {
@@ -159,6 +161,8 @@ public static class SharedDataJson
             // id 损坏时重新生成，保证配置仍可被编辑保存
             Id = Guid.TryParse(ReadString(element, "id"), out var id) ? id : Guid.NewGuid(),
             IsEnabled = ReadBool(element, "isEnabled") ?? false,
+            // 容错解码：旧 JSON / 损坏字段缺失时默认 false（与 macOS showInWidget 对齐）
+            ShowInWidget = ReadBool(element, "showInWidget") ?? false,
             ApiKey = protector.Unprotect(ReadString(element, "apiKey") ?? ""),
             // 兼容旧字段名 baseURL / baseUrl
             BaseURLOverride = ReadString(element, "baseURLOverride")
@@ -178,6 +182,7 @@ public static class SharedDataJson
         var usage = new ProviderUsage
         {
             Kind = kind.Value,
+            ConfigId = Guid.TryParse(ReadString(element, "configId"), out var configId) ? configId : null,
             DisplayName = ReadString(element, "displayName") ?? kind.Value.DisplayName(),
             State = ReadString(element, "state") switch
             {

@@ -41,7 +41,9 @@ public static class AlertEngine
             foreach (var window in usage.Windows)
             {
                 if (window.UsedPercent is not { } percent) continue;
-                var key = $"{usage.Kind.KindId()}-{window.Title}";
+                // key 用 ConfigId（同 kind 多实例互不冲突）；旧缓存无 ConfigId 回退 kind
+                var configKey = usage.ConfigId?.ToString() ?? usage.Kind.KindId();
+                var key = $"{configKey}-{window.Title}";
 
                 if (percent >= threshold)
                 {

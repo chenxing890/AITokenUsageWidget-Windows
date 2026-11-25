@@ -67,11 +67,30 @@
                             </ListView.ItemTemplate>
                         </ListView>
 
-                        <TextBlock Text="供应商" Style="{StaticResource SectionHeaderText}"
-                                   Margin="8,10,0,4" />
+                        <!-- 供应商分区：标题 + 「+」新增实例菜单（同模型可多个，对齐 macOS） -->
+                        <Grid Margin="8,10,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="供应商" Style="{StaticResource SectionHeaderText}" />
+                            <Button Grid.Column="1" Padding="5,2" Margin="0,-2,4,0"
+                                    Background="Transparent" BorderThickness="0"
+                                    ToolTipService.ToolTip="新增实例（同模型可多个）">
+                                <FontIcon Glyph="&#xE710;" FontSize="12" />
+                                <Button.Flyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="新增 DeepSeek" Tag="DeepSeek" Click="OnAddInstance" />
+                                        <MenuFlyoutItem Text="新增 Kimi" Tag="Kimi" Click="OnAddInstance" />
+                                        <MenuFlyoutItem Text="新增 GLM" Tag="Glm" Click="OnAddInstance" />
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                            </Button>
+                        </Grid>
                         <ListView x:Name="ProviderList" SelectionMode="Single"
                                   Background="Transparent" BorderThickness="0" Padding="0"
-                                  SelectionChanged="OnProviderSelected">
+                                  SelectionChanged="OnProviderSelected"
+                                  RightTapped="OnProviderRightTapped">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Height="46">

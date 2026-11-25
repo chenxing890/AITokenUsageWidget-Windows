@@ -121,4 +121,38 @@ public class AlertEngineTests
         Assert.Equal(3, result.Alerts.Count);
         Assert.Equal(["kimi-5 小时", "kimi-7 天", "glm-月度工具"], result.Alerts.Select(a => a.Key).ToList());
     }
+
+    // ---- 同 kind 多实例（对齐 macOS 9d0a8bb：告警 key 改用 configID）----
+
+    [Fact]
+    public void SameKindInstances_IndependentAlertKeys()
+    {
+        var idA = Guid.NewGuid();
+        var idB = Guid.NewGuid();
+        ProviderUsage Instance(Guid id, double percent) => new()
+        {
+            Kind = ProviderKind.Kimi,
+            ConfigId = id,
+            DisplayName = id == idA ? "Kimi 主力" : "Kimi 备用",
+            State = UsageState.Ok,
+            Windows = [new UsageWindow { Title = "5 小时", UsedPercent = percent }],
+        };
+
+        var result = AlertEngine.Evaluate(
+            [Instance(idA, 82.0), Instance(idB, 82.0)], true, 80, []);
+
+        Assert.Equal(2, result.Alerts.Count); // 同窗口各自告警，互不吞并
+        Assert.Equal([$"{idA}-5 小时", $"{idB}-5 小时"], result.Alerts.Select(a => a.Key));
+        Assert.Equal([$"{idA}-5 小时", $"{idB}-5 小时"], result.AlertedKeys);
+    }
+
+    [Fact]
+    public void ConfigIdMissing_FallsBackToKindKey()
+    {
+        // 旧缓存/占位无 ConfigId：回退 kind key，与历史 alertedKeys 兼容
+        var result = AlertEngine.Evaluate(
+            [Usage(ProviderKind.Kimi, ("5 小时", 82.0))], true, 80, ["kimi-5 小时"]);
+        Assert.Empty(result.Alerts); // 已记录过，不重复
+        Assert.Equal(["kimi-5 小时"], result.AlertedKeys);
+    }
 }

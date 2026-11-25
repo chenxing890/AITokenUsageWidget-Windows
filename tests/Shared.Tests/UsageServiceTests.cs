@@ -100,6 +100,97 @@ public class UsageServiceTests
         Assert.Single(usage.Windows);
     }
 
+    // ---- Kimi 新套餐（对齐 macOS 002e394 / c7d152e）----
+
+    [Fact]
+    public async Task Kimi_NewPlan_ParsesMonthlyRatioWindow_WithoutCookie()
+    {
+        // 新套餐（如 kimi-166）：无顶层 7 天 usage，改为 usages.limit_month_total（百分比+重置时间）
+        var config = Config(ProviderKind.Kimi, "sk-kimi");
+        var handler = new FakeHttpHandler().Route("/usages",
+            """
+            {
+              "limits": [
+                {"window": {"duration": 300},
+                 "detail": {"limit": "100", "used": "42", "resetTime": "2026-01-09T15:23:13Z"}}
+              ],
+              "usages": {"limit_month_total": {"used_ratio": 0.35, "reset_time": "2026-01-31T00:00:00Z"}}
+            }
+            """);
+        var usage = await Service(handler).FetchAsync(config);
+
+        Assert.Equal(UsageState.Ok, usage.State);
+        Assert.Equal(config.Id, usage.ConfigId); // 各 return 路径填 configID
+        Assert.Equal(2, usage.Windows.Count); // 5 小时 + 本月总额（无 7 天窗口）
+
+        var monthly = usage.Windows[1];
+        Assert.Equal("本月总额", monthly.Title);
+        Assert.Equal(35, monthly.UsedPercent); // used_ratio 0..1 → 百分比
+        Assert.Null(monthly.UsedText); // 只给百分比
+        Assert.Equal(DateTimeOffset.Parse("2026-01-31T00:00:00Z"), monthly.ResetTime);
+    }
+
+    [Fact]
+    public async Task Kimi_NewPlan_CookieOverridesMonthlyTotal()
+    {
+        // 配置了 Cookie：网页 billing 的绝对数值版覆盖「本月总额」（信息更详细）
+        var config = Config(ProviderKind.Kimi, "sk-kimi");
+        config.ExtraToken = "kimi-auth-cookie";
+        var handler = new FakeHttpHandler()
+            .Route("/usages",
+                """
+                {"limits": [],
+                 "usages": {"limit_month_total": {"used_ratio": 0.35, "reset_time": "2026-01-31T00:00:00Z"}}}
+                """)
+            .Route("kimi.gateway.billing", "{\"totalQuota\":{\"limit\":\"1000\",\"used\":\"500\"}}");
+        var usage = await Service(handler).FetchAsync(config);
+
+        var monthly = Assert.Single(usage.Windows); // 5h 无 limits、无 7 天，仅本月总额一条
+        Assert.Equal("本月总额", monthly.Title);
+        Assert.Equal(50, monthly.UsedPercent); // Cookie 版（50%）覆盖 ratio 版（35%）
+    }
+
+    [Fact]
+    public async Task Kimi_NewPlan_RatioMissing_FallsBackToCookieWindow()
+    {
+        var config = Config(ProviderKind.Kimi, "sk-kimi");
+        config.ExtraToken = "kimi-auth-cookie";
+        var handler = new FakeHttpHandler()
+            .Route("/usages", """{"usages": {}}""")
+            .Route("kimi.gateway.billing", "{\"totalQuota\":{\"limit\":\"1000\",\"used\":\"350\"}}");
+        var usage = await Service(handler).FetchAsync(config);
+
+        var monthly = Assert.Single(usage.Windows);
+        Assert.Equal("本月总额", monthly.Title);
+        Assert.Equal(35, monthly.UsedPercent);
+    }
+
+    [Fact]
+    public async Task Kimi_NewPlan_MonthlyCoding_NotDuplicated()
+    {
+        // 对齐 macOS c7d152e：limit_month_code 与 limit_month_total 数据重合，不再显示「本月 Coding」
+        var handler = new FakeHttpHandler().Route("/usages",
+            """
+            {"usages": {
+              "limit_month_total": {"used_ratio": 0.35, "reset_time": "2026-01-31T00:00:00Z"},
+              "limit_month_code": {"used_ratio": 0.34, "reset_time": "2026-01-31T00:00:00Z"}
+            }}
+            """);
+        var usage = await Service(handler).FetchAsync(Config(ProviderKind.Kimi, "sk-kimi"));
+
+        Assert.Single(usage.Windows);
+        Assert.Equal("本月总额", usage.Windows[0].Title);
+    }
+
+    [Fact]
+    public async Task Kimi_NewPlan_NoWindowsAtAll_IsError()
+    {
+        var handler = new FakeHttpHandler().Route("/usages", """{"usages": {}}""");
+        var usage = await Service(handler).FetchAsync(Config(ProviderKind.Kimi, "sk-kimi"));
+        Assert.Equal(UsageState.Error, usage.State);
+        Assert.Equal("服务器返回为空", usage.ErrorMessage);
+    }
+
     // ---- GLM ----
 
     private const string GlmLimitsJson =

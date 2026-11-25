@@ -15,6 +15,11 @@ public sealed class ProviderConfig
     /// <summary>API Key（明文，仅内存中；序列化时加密）。</summary>
     public string ApiKey { get; set; } = "";
 
+    /// <summary>
+    /// 是否在小组件中显示（最多同时勾选 3 个，由 UI 层限制；与 macOS showInWidget 对齐）。
+    /// </summary>
+    public bool ShowInWidget { get; set; }
+
     /// <summary>自定义接口根地址，留空使用 Kind.DefaultBaseURL()。</summary>
     public string BaseURLOverride { get; set; } = "";
 

@@ -50,18 +50,38 @@ public static class AppSettings
 
     public static void ClearCorruptNotice() => CorruptBackupNotice = null;
 
-    public static ProviderConfig Config(ProviderKind kind) =>
-        Data.Configs.FirstOrDefault(c => c.Kind == kind) ?? new ProviderConfig(kind);
+    /// <summary>按 Id 查找实例（同 kind 多实例各有一份配置）；找不到返回 null。</summary>
+    public static ProviderConfig? Config(Guid id) =>
+        Data.Configs.FirstOrDefault(c => c.Id == id);
 
     // ---- 修改即保存（自动保存），并通知小组件 ----
     // 落盘前必须 EnsureDiskSafeToWrite：快照不可信时只改内存，绝不覆盖磁盘配置。
 
+    /// <summary>按 Id 保存（不存在则追加）——同 kind 多实例互不覆盖。</summary>
     public static void SaveConfig(ProviderConfig config)
     {
         var safe = EnsureDiskSafeToWrite();
-        var index = Data.Configs.FindIndex(c => c.Kind == config.Kind);
+        var index = Data.Configs.FindIndex(c => c.Id == config.Id);
         if (index >= 0) Data.Configs[index] = config;
         else Data.Configs.Add(config);
+        if (safe) Store.Save(Data);
+        Commit();
+    }
+
+    /// <summary>新增实例（侧栏「+」菜单；同 kind 可多个）。</summary>
+    public static void AddConfig(ProviderConfig config)
+    {
+        var safe = EnsureDiskSafeToWrite();
+        Data.Configs.Add(config);
+        if (safe) Store.Save(Data);
+        Commit();
+    }
+
+    /// <summary>删除实例（右键删除，带确认）。</summary>
+    public static void DeleteConfig(Guid id)
+    {
+        var safe = EnsureDiskSafeToWrite();
+        Data.Configs.RemoveAll(c => c.Id == id);
         if (safe) Store.Save(Data);
         Commit();
     }

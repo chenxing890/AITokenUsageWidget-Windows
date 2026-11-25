@@ -12,12 +12,16 @@ namespace AITokenUsageWidget.App.Pages;
 
 /// <summary>
 /// 供应商详情页（对齐 macOS ProviderDetailColumn）：
-/// 头部（图标 + 名称 + 启用开关）→ 未启用提示 / 接口配置 / 连接测试 → 小组件实时预览。
-/// 所有修改即时自动保存并通知小组件刷新。
+/// 头部（图标 + 名称 + 启用/在小组件显示开关）→ 未启用提示 / 接口配置 / 连接测试 → 小组件实时预览。
+/// 所有修改即时自动保存并通知小组件刷新。按 ConfigId 定位实例（同 kind 多实例）。
 /// </summary>
 public sealed partial class ProviderPage : Page
 {
+    /// <summary>「在小组件显示」上限（对齐 macOS：最多 3 个）。</summary>
+    public const int MaxWidgetInstances = 3;
+
     private ProviderKind _kind = ProviderKind.DeepSeek;
+    private Guid _configId;
     private ProviderConfig _config = new(ProviderKind.DeepSeek);
     private bool _loading;
     private bool _fetching;
@@ -42,14 +46,18 @@ public sealed partial class ProviderPage : Page
     protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        if (e.Parameter is ProviderKind kind) _kind = kind;
+        if (e.Parameter is Guid configId)
+        {
+            _configId = configId;
+            _kind = AppSettings.Config(configId)?.Kind ?? _kind;
+        }
         LoadConfig();
     }
 
     private void LoadConfig()
     {
         _loading = true;
-        _config = AppSettings.Config(_kind);
+        _config = AppSettings.Config(_configId) ?? _config;
 
         HeaderChip.Kind = _kind;
         HeaderTitle.Text = _kind.DisplayName();
@@ -57,12 +65,14 @@ public sealed partial class ProviderPage : Page
         BuiltInUrlHint.Text = $"接口地址已内置：{_kind.DefaultBaseURL()}";
         ApiKeyLabel.Text = $"API Key（{_kind.ApiKeyHint()}）";
         NameLabel.Text = $"显示名称（留空使用 {_kind.DisplayName()}）";
-        DisabledHint.Text = $"打开右上角开关启用 {_kind.DisplayName()}。配置并保存后，对应卡片会自动出现在 Windows 小组件面板中。";
+        DisabledHint.Text = $"打开右上角「启用」开关启用 {_kind.DisplayName()}：启用后卡片出现在主界面仪表盘；要上 Windows 小组件，还需打开「在小组件显示」（最多 {MaxWidgetInstances} 个）。";
 
         // 测试按钮用品牌色（对齐 macOS .borderedProminent tint）
         TestButton.Background = (Brush)Application.Current.Resources[$"Brand{_kind}"];
 
         EnableToggle.IsOn = _config.IsEnabled;
+        WidgetToggle.IsOn = _config.ShowInWidget;
+        UpdateWidgetToggleHint();
         ApiKeyBox.Password = _config.ApiKey;
         CookieSection.Visibility = _kind.SupportsCookie() ? Visibility.Visible : Visibility.Collapsed;
         CookieBox.Password = _config.ExtraToken;
@@ -94,7 +104,7 @@ public sealed partial class ProviderPage : Page
 
     private void ShowSimulatedPreview()
     {
-        PreviewCard.Usage = Placeholders.For(_kind);
+        PreviewCard.Usage = Placeholders.For(_kind, _config.Id, _config.Name);
         SimulatedBadge.Visibility = Visibility.Visible;
         PreviewCaption.Text = "模拟数据 · 配置 API Key 后自动显示实际用量";
         TestResultPanel.Visibility = Visibility.Collapsed;
@@ -103,7 +113,7 @@ public sealed partial class ProviderPage : Page
     /// <summary>连接中：先上占位卡片（预览区域不塌陷），并显示「正在连接」反馈。</summary>
     private void ShowConnectingPreview()
     {
-        PreviewCard.Usage = Placeholders.For(_kind);
+        PreviewCard.Usage = Placeholders.For(_kind, _config.Id, _config.Name);
         SimulatedBadge.Visibility = Visibility.Collapsed;
         PreviewCaption.Text = "正在连接…";
         ShowTestResult("\uE895", Windows.UI.Color.FromArgb(0xFF, 0x75, 0x75, 0x75),
@@ -199,6 +209,42 @@ public sealed partial class ProviderPage : Page
         UpdateCardsVisibility();
         Save();
         if (_config.IsEnabled && _config.HasKey) ScheduleAutoConnect();
+    }
+
+    /// <summary>「在小组件显示」开关：最多 {MaxWidgetInstances} 个，触顶弹提示并回退。</summary>
+    private async void OnWidgetToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        if (WidgetToggle.IsOn)
+        {
+            var others = AppSettings.Data.Configs.Count(c => c.Id != _config.Id && c.ShowInWidget);
+            if (others >= MaxWidgetInstances)
+            {
+                WidgetToggle.IsOn = false; // 回退，不保存
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = Content.XamlRoot,
+                    Title = "小组件位置已满",
+                    Content = $"最多 {MaxWidgetInstances} 个实例显示在小组件。请先在其他实例的详情页关闭「在小组件显示」。",
+                    CloseButtonText = "知道了",
+                    DefaultButton = ContentDialogButton.Close,
+                };
+                await dialog.ShowAsync();
+                return;
+            }
+        }
+        _config.ShowInWidget = WidgetToggle.IsOn;
+        Save();
+        UpdateWidgetToggleHint();
+    }
+
+    /// <summary>开关下方「已勾选 n/3」提示（对齐 macOS 已启用 N/3）。</summary>
+    private void UpdateWidgetToggleHint()
+    {
+        var total = AppSettings.Data.Configs.Count(c => c.ShowInWidget);
+        WidgetToggleHint.Text = total == 0
+            ? $"最多 {MaxWidgetInstances} 个"
+            : $"已勾选 {total}/{MaxWidgetInstances}";
     }
 
     private void OnApiKeyChanged(object sender, RoutedEventArgs e)
